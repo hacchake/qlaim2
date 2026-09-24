@@ -1,9 +1,21 @@
-# QLAIM ─ Qix風 陣取りアーケード
+# QLAIM 2 ─ ナワバリ陣取りアーケード(QLAIM 1 の続編。1 は hacchake/qlaim のタグ v1)
 
 ## このプロジェクトについて
 - 依存なしの単一HTMLブラウザゲーム。本体は `index.html` の1ファイルのみ(CSS/JS全部入り)。
 - GitHub Pages にそのまま置いて動かす前提。ビルド工程・外部ライブラリは導入しないこと。
 - 音はすべて WebAudio で合成(音声ファイルなし)。
+
+## QLAIM 2 の仕組み
+- 保存キーは `store` が `qlaim.` → `qlaim2.` に読み替える(1 と同じ github.io なので混ざらないように)
+- 自由移動(平面のみ): 自機の位置は `player.fx, fy`(マス単位の小数)。`inputVec()`(キー同時押し or `stickVec`)の向きに `freeMove` で進む。
+  マスが変わるときは `tryMoveTo` が playerStep を呼ぶ。斜めは先に越える側のマスを経由して、線が必ず上下左右につながる(塗りつぶしの漏れ防止)。
+  壁では軸ごとにすべる。描いた道すじは `player.pts`(描画用)。立体はこれまでどおりマスごと
+- VS(`isVS()`): CPU は `rivals`。同じ `freeMove` と `rivalStep` で動く。描きかけの線は grid の `RTRAIL`、陣地は `ownA`(2+CPU番号)と `r.area`。
+  自機の陣地 = `claimed - rivalAreaSum()`。`visitedFrom` は描きかけの線(TRAIL/RTRAIL)を通れる(仕切りにしない)。
+  AI: `planRival`(自機の線が近ければ切りにいく / 候補を8つ作ってヌメリンから安全で広いものへ / なければ `frontierPath` で歩く)、
+  描いている途中で危ない・進めない・14秒超 → `rivalGoHome`(空き地を通って一番近い線へ)。強さは `rivalSkill()`(エリアで上がる)
+- 勝負: `vsT`(90秒)が0か占領率が目標で `vsEnd`。勝ち → startClear、負け → state 'vslose' → Z で `vsRetry`(残機-1)
+- fuzz は VS と、斜め・アナログ入力も試す。不変条件は `claimed === initOpen - 空き地 - 自機の線 - CPUの線`
 
 ## オーナーについて
 - オーナー(はちや)は自分でコードを書いたり直したりしない。

@@ -1446,5 +1446,64 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('クリアの見せ場の描画が例外なし', !err, err);
 }
 
+
+// ---- 93) 自由移動(平面) ----
+{
+  settings.mode = 'PLANE'; startGame(); setState('play'); buddies = []; sparxes = []; seekers = []; items = [];
+  qixes = qixes.slice(0, 1); qixes[0].x = GW * 0.8; qixes[0].y = GH * 0.3;
+  for (const k of ['up', 'down', 'left', 'right']) releaseDir(k);
+  assert('斜めの入力は正規化される', (() => { pressDir('up'); pressDir('right'); const v = inputVec(); releaseDir('up'); releaseDir('right'); return Math.abs(Math.hypot(v[0], v[1]) - 1) < 1e-9 && v[0] > 0 && v[1] < 0; })());
+  const x0 = player.fx, y0 = player.fy;
+  pressDir('up'); pressDir('right');
+  for (let i = 0; i < 40; i++) update(1 / 60);
+  assert('斜めにすすんで線を引く', player.drawing && player.fx > x0 + 1 && player.fy < y0 - 1, player.fx.toFixed(1) + ',' + player.fy.toFixed(1));
+  let conn = true;
+  for (let i = 1; i < trail.length; i++) if (nbIndex(trail[i - 1], trail[i]) < 0) conn = false;
+  assert('斜めでも線は上下左右につながっている', conn && trail.length > 5);
+  releaseDir('right'); pressDir('left');                // 左上へ
+  for (let i = 0; i < 40; i++) update(1 / 60);
+  releaseDir('up'); pressDir('down');                    // 左下へ → 下の壁に戻って閉じる
+  for (let i = 0; i < 200 && player.drawing; i++) update(1 / 60);
+  for (const k of ['up', 'down', 'left', 'right']) releaseDir(k);
+  assert('斜めの線で囲んで陣地が取れる', !player.drawing && claimed > 20, claimed);
+  assert('線の上に戻っている', isBoundary(player.c));
+  stickVec = [0.6, -0.8];
+  assert('スティックのアナログの向きがそのまま使われる', inputVec()[0] === 0.6);
+  stickVec = null;
+}
+// ---- 94) ナワバリバトル(CPU) ----
+{
+  settings.mode = 'VS'; startGame(); setState('play'); buddies = []; sparxes = []; seekers = []; items = [];
+  assert('VS: CPUが出る・制限時間', rivals.length === 1 && vsT === CONFIG.VS_TIME && qixes.length === 1);
+  const r = rivals[0];
+  assert('CPUは線の上から始まる', isBoundary(r.c));
+  // CPU が陣地を取る
+  let t0 = rivalAreaSum();
+  for (let i = 0; i < 60 * 25 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); }
+  assert('CPUが自分で陣地を取る', rivalAreaSum() > t0, rivalAreaSum());
+  assert('自機とCPUの陣地の合計 = 全体', playerArea() + rivalAreaSum() === claimed);
+  // CPU が自機の線を切る
+  startGame(); setState('play'); player.invuln = 0; deathTimer = 0;
+  const rr = rivals[0];
+  player.drawing = true; const tc = idx(40, 60); grid[tc] = TRAIL; trail = [tc];
+  rr.drawing = true; rivalStep(rr, tc);
+  assert('CPUが自機の線に触れると自機のミス', deathTimer > 0 && lastDeath.includes('線を切られた'), lastDeath);
+  deathTimer = 0; grid[tc] = OPEN; trail = []; player.drawing = false; rr.drawing = false; rr.trail = [];
+  // 自機が CPU の線を切る
+  rr.c = idx(50, 70); rr.drawing = true; const rc = idx(51, 70); grid[rc] = RTRAIL; rr.trail = [rc]; rr.pts = [[50.5, 70.5]];
+  player.drawing = true; player.c = idx(52, 70); trail = [player.c]; grid[player.c] = TRAIL;
+  playerStep(rc);
+  assert('自機がCPUの線に触れるとCPUがダウン', rr.dead > 0 && grid[rc] !== RTRAIL);
+  // 勝ち負け
+  startGame(); setState('play'); rivals[0].area = 10; claimed = 50;
+  vsEnd(); assert('広いほうが勝ち(自機40 > CPU10)', state === 'clear' && vsWin);
+  startGame(); setState('play'); rivals[0].area = 60; claimed = 70; const lv0 = lives;
+  vsEnd(); assert('せまいと負け', state === 'vslose' && !vsWin);
+  let err = null; try { render(); } catch (e) { err = e.stack; } assert('負け画面の描画', !err, err);
+  stTimer = 1; onAction(); assert('負けたら残機を1つ使ってやり直し', lives === lv0 - 1 && state === 'ready');
+  err = null; try { setState('play'); render(); } catch (e) { err = e.stack; } assert('VSの描画(CPU・バー)', !err, err);
+  assert('VSの自機の色はオレンジで固定', inkHex() === INK_COLORS[0]);
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);
