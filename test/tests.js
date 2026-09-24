@@ -1384,13 +1384,13 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
     const t2 = s2 / 2, a = P[i], b = P[i + 1];
     const pt = a.map((v, j) => v + (b[j] - v) * t2);
     if (Math.abs(b[0] - a[0]) > 1 || Math.abs(b[1] - a[1]) > 1) continue;   // 貼り合わせの継ぎ目はとばす
-    cells.add(surf.ptCell(pt));
+    cells.add(surf.ptCell(pt.length === 3 ? vnorm(pt) : pt));   // 球の上の点は球面へ戻す(直線で結ぶと内側にずれる)
   }
   const seen = new Set(); surf.segEach(sg, c => { seen.add(c); return false; });
   const miss = [...cells].filter(c => !seen.has(c));
   assert(mode + ': 腕の上のマスはすべて判定される', miss.length === 0, miss.length + '/' + cells.size);
   // 腕の途中に1マスだけ線を置く → ミス
-  const mid = [...cells][Math.floor(cells.size * 0.3)];
+  const mid = [...cells].filter(c => seen.has(c))[Math.floor(cells.size * 0.3)];
   if (grid[mid] === OPEN) {
     player.invuln = 0; deathTimer = 0; q.segs = [sg]; grid[mid] = TRAIL; trail = [mid]; player.drawing = true;
     let hit = false; surf.segEach(sg, c => { if (grid[c] === TRAIL) hit = true; return hit; });
@@ -1495,14 +1495,15 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   playerStep(rc);
   assert('自機がCPUの線に触れるとCPUがダウン', rr.dead > 0 && grid[rc] !== RTRAIL);
   // 勝ち負け
-  startGame(); setState('play'); rivals[0].area = 10; claimed = 50;
+  const fakeArea = (me, cpu) => { let a = 0, b2 = 0; for (let i = 0; i < surf.N; i++) { if (grid[i] !== OPEN) continue; if (a < me) { grid[i] = WALL; ownA[i] = 1; a++; } else if (b2 < cpu) { grid[i] = WALL; ownA[i] = 2; b2++; } } claimed = me + cpu; recountAreas(); };
+  startGame(); setState('play'); fakeArea(40, 10);
   vsEnd(); assert('広いほうが勝ち(自機40 > CPU10)', state === 'clear' && vsWin);
-  startGame(); setState('play'); rivals[0].area = 60; claimed = 70; const lv0 = lives;
+  startGame(); setState('play'); fakeArea(10, 60); const lv0 = lives;
   vsEnd(); assert('せまいと負け', state === 'vslose' && !vsWin);
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('負け画面の描画', !err, err);
   stTimer = 1; onAction(); assert('負けたら残機を1つ使ってやり直し', lives === lv0 - 1 && state === 'ready');
   err = null; try { setState('play'); render(); } catch (e) { err = e.stack; } assert('VSの描画(CPU・バー)', !err, err);
-  assert('VSの自機の色はオレンジで固定', inkHex() === INK_COLORS[0]);
+  assert('VSの自機は赤チーム(赤系で揺らぐ)', inkHex() === TEAM_SHADES[0][0] && TEAM_SHADES[0].includes(palHex(inkNo(1))));
 }
 
 
@@ -1536,7 +1537,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('人間1人ならIJKLでも動ける', humanInput(1).v && humanInput(1).v[0] === 1); codesDown.clear();
   party.humans = 2;
   // 試合終了と順位
-  rivals[0].area = 30; rivals[1].area = 50; rivals[2].area = 10;
+  { let n = [30, 50, 10]; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) { for (let t2 = 0; t2 < 3; t2++) if (n[t2] > 0) { grid[i] = WALL; ownA[i] = 2 + t2; n[t2]--; break; } } recountAreas(); }
   partyEnd();
   assert('時間切れで順位(黄=P2が1位)', state === 'partyres' && partyRank[0] === rivals[1] && partyRank[2] === rivals[2]);
   err = null; try { render(); } catch (e) { err = e.stack; } assert('結果画面の描画', !err, err);
@@ -1544,6 +1545,44 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('Zで次のラウンド', state === 'ready' && level === 2 && rivals.length === 3);
   assert('PARTYでは記録を残さない・buddyなし', buddies.length === 0);
   settings.mode = 'VS';
+}
+
+
+// ---- 96) チームの色の揺らぎ・上塗り・中立・ハーモニー ----
+{
+  const shades = new Set(); for (let i = 0; i < 40; i++) shades.add(palHex(teamNo(2)));
+  assert('チームの色は系統の中で揺らぐ(青系4色)', shades.size === 4 && [...shades].every(c => TEAM_SHADES[2].includes(c)));
+  assert('中立の色: 赤+青=紫系', NEUTRAL_MIX['02'].includes(palHex(neutralNo(2, 0))));
+  settings.mode = 'PARTY'; party.humans = 3; startGame(); setState('play'); sparxes = []; items = [];
+  // 赤(P1)の陣地を作る
+  const R = rivals[0], B = rivals[2];
+  const cells = []; for (let y = 60; y < 70; y++) for (let x = 40; x < 60; x++) { const c = idx(x, y); grid[c] = WALL; ownA[c] = 2 + R.id; colA[c] = teamNo(0); cells.push(c); }
+  claimed += cells.length; recountAreas();
+  const r0 = R.area;
+  // 青が上塗りで赤の陣地を走る → 中立
+  B.overT = 5; B.c = idx(50, 65); B.fx = 50.5; B.fy = 65.5; B.drawing = false;
+  const n1 = overPaint(50.5, 65.5, 2 + B.id, B.team);
+  assert('相手の陣地を上塗りすると中立になる', n1 > 0 && neutralArea() === n1 && R.area === r0 - n1);
+  assert('中立は2色が混ざった色(赤+青=紫系)', NEUTRAL_MIX['02'].includes(palHex(colA[idx(50, 65)])));
+  assert('中立になったばかりは、すぐには自分の色にならない', overPaint(50.5, 65.5, 2 + B.id, B.team) === 0);
+  blinkT += 1.5;
+  const n2 = overPaint(50.5, 65.5, 2 + B.id, B.team);
+  assert('中立をもう一度塗ると自分の陣地', n2 === n1 && neutralArea() === 0 && B.area >= n1 && TEAM_SHADES[2].includes(palHex(colA[idx(50, 65)])));
+  assert('全体 = 各チーム + 中立', rivals.reduce((a, r) => a + r.area, 0) + neutralArea() + ownCount[1] + ownCount[0] === claimed);
+  // 上塗り中は陣地の上を歩ける
+  assert('上塗り中は陣地の上を歩ける', rivalStep(B, idx(51, 65)) && B.c === idx(51, 65));
+  B.overT = 0;
+  // アイテム: PARTY は上塗りだけ
+  let only = true; for (let i = 0; i < 30; i++) if (pickItemKind() !== 'over') only = false;
+  assert('PARTYのアイテムは上塗りだけ', only);
+  settings.mode = 'TOUR'; let none = true; for (let i = 0; i < 200; i++) if (pickItemKind() === 'over') none = false;
+  assert('ひとりのモードに上塗りは出ない', none);
+  // 音(音声なし環境でも落ちない)
+  settings.mode = 'PARTY'; startGame(); setState('play');
+  let err = null; try { rivals[0].drawing = true; updateVoices(); rivals[0].drawing = false; updateVoices(); Snd.voiceStopAll(); } catch (e) { err = e.stack; }
+  assert('描く音のハーモニー(音声なし環境で例外なし)', !err, err);
+  err = null; try { rivals[1].overT = 3; render(); } catch (e) { err = e.stack; } assert('上塗り中の描画', !err, err);
+  settings.mode = 'VS'; party.humans = 2;
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');

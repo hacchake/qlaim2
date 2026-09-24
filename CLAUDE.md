@@ -18,6 +18,12 @@
   `codesDown`(e.code)+ゲームパッド(つないだ順)+ P1 はスティック/FASTボタン)。ふつうの `player` は invuln=Infinity でお休み・描かない。
   ロビー state 'lobby'(`party.humans`・`party.cpu`、`qlaim2.party` に保存)→ 試合 → `partyEnd` → state 'partyres'(順位)→ Z で `nextParty`。
   ファイターは他のファイターの線(RTRAIL)に入るとその線を切る(`rivalFail(q, 'cut', by)`)。記録は残さない。buddy・アイテム・オイカケなし
+- チームの色: `TEAM_SHADES`(赤・黄・青 各4段)を `teamNo(team)` でランダムに。colA の `TEAMC_BASE` から(チーム12 + 中立6 = `TEAMC_ALL`)。
+  持ち主 `ownA`: 0 最初の壁・未所有 / 1 自機 / 2+番号 ファイター / 9 `OWN_NEUTRAL`。広さは `recountAreas()` が数え直す(`ownCount`、`r.area`)
+- 上塗り(アイテム 'over'、`hasRivals()` のときだけ。PARTY はこれだけ出る): `overT` の間は陣地の上も歩け(`canOverWalk`)、`overPaint` が半径2マスを塗る。
+  相手 → 中立(`neutralNo` = 2色の混ざった色、`neutralAt` に時刻)、中立 → 自分(中立になって1.2秒たってから)。線(colA 0)と最初の壁は塗らない
+- 描く音のハーモニー: ファイターごとに `Snd.voiceStart(id, team)`。チーム0/1/2 が和音の根音/3度/5度から始まり、線が伸びるほど和音の中を上がる(`voiceHz`)。
+  左右は画面の位置。状態が変わるとき `voiceStopAll`
 - `isBoundary` は描きかけの線(TRAIL/RTRAIL)も空き地あつかい(他人の線で自分の足場が一時的に「線の外」にならないように)。
   `snapActor` は空き地の中からでも一番近い線を探す
 - 勝負: `vsT`(90秒)が0か占領率が目標で `vsEnd`。勝ち → startClear、負け → state 'vslose' → Z で `vsRetry`(残機-1)

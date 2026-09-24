@@ -42,8 +42,8 @@ for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PARTY','PARTY','PLANE','C
       if (state === 'play' && claimed !== initOpen - countOpen() - trail.length - rivalTrailCells()) {
         problems.push(md + ' 整合 claimed=' + claimed + ' vs ' + (initOpen - countOpen() - trail.length - rivalTrailCells()) + ' lv' + level); break;
       }
-      for (const r of (state === 'play' ? rivals : [])) { if (!r.drawing && r.dead <= 0 && !isBoundary(r.c)) { if ((r.offN = (r.offN || 0) + 1) > 2) { problems.push(md + ' ファイターが線の外 ' + r.name + ' c=' + r.c); break; } } else r.offN = 0; }
-      if (state === 'play' && !isParty() && !player.drawing && !isBoundary(player.c) && deathTimer <= 0) { problems.push(md + ' 自機が線の外 lv' + level + ' c=' + player.c + ' prev=' + player.prev); break; }
+      for (const r of (state === 'play' ? rivals : [])) { if (!r.drawing && r.dead <= 0 && !(r.overT > 0) && !isBoundary(r.c)) { if ((r.offN = (r.offN || 0) + 1) > 2) { problems.push(md + ' ファイターが線の外 ' + r.name + ' c=' + r.c); break; } } else r.offN = 0; }
+      if (state === 'play' && !isParty() && !player.drawing && !(player.overT > 0) && !isBoundary(player.c) && deathTimer <= 0) { problems.push(md + ' 自機が線の外 lv' + level + ' c=' + player.c + ' prev=' + player.prev); break; }
     }
     for (const k of DIRS) releaseDir(k); stickVec = null;
   }
