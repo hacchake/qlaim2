@@ -14,6 +14,12 @@
   自機の陣地 = `claimed - rivalAreaSum()`。`visitedFrom` は描きかけの線(TRAIL/RTRAIL)を通れる(仕切りにしない)。
   AI: `planRival`(自機の線が近ければ切りにいく / 候補を8つ作ってヌメリンから安全で広いものへ / なければ `frontierPath` で歩く)、
   描いている途中で危ない・進めない・14秒超 → `rivalGoHome`(空き地を通って一番近い線へ)。強さは `rivalSkill()`(エリアで上がる)
+- PARTY(`isParty()`): 3チーム(赤・黄・青 = `TEAM_COLS`)。全員が `rivals` のファイター(人間は `r.human` = 1〜3、入力は `humanInput(n)`:
+  `codesDown`(e.code)+ゲームパッド(つないだ順)+ P1 はスティック/FASTボタン)。ふつうの `player` は invuln=Infinity でお休み・描かない。
+  ロビー state 'lobby'(`party.humans`・`party.cpu`、`qlaim2.party` に保存)→ 試合 → `partyEnd` → state 'partyres'(順位)→ Z で `nextParty`。
+  ファイターは他のファイターの線(RTRAIL)に入るとその線を切る(`rivalFail(q, 'cut', by)`)。記録は残さない。buddy・アイテム・オイカケなし
+- `isBoundary` は描きかけの線(TRAIL/RTRAIL)も空き地あつかい(他人の線で自分の足場が一時的に「線の外」にならないように)。
+  `snapActor` は空き地の中からでも一番近い線を探す
 - 勝負: `vsT`(90秒)が0か占領率が目標で `vsEnd`。勝ち → startClear、負け → state 'vslose' → Z で `vsRetry`(残機-1)
 - fuzz は VS と、斜め・アナログ入力も試す。不変条件は `claimed === initOpen - 空き地 - 自機の線 - CPUの線`
 

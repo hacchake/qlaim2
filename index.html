@@ -289,7 +289,10 @@ const SURF_INFO = {
 };
 
 /* ---- 遊ぶ盤面(タイトル画面で ←→ で選択) ---- */
-const MODES = ['VS', 'TOUR', 'DAILY', 'ZEN'].concat(Object.keys(CONFIG.SURF));
+const MODES = ['VS', 'PARTY', 'TOUR', 'DAILY', 'ZEN'].concat(Object.keys(CONFIG.SURF));
+// PARTY(3チーム対戦): 赤・黄・青の3チーム。人間1〜3人(ひとつの画面で)、足りないぶんはCPU
+function isParty() { return settings.mode === 'PARTY'; }
+function hasRivals() { return isVS() || isParty(); }
 // VS(ナワバリバトル): 自機と同じことができるCPUと、制限時間内に広い陣地を取ったほうが勝ち
 function isVS() { return settings.mode === 'VS'; }
 // ZEN: のんびりお絵かき。ミスなし・SPARX/SEEKERなし・導火線なし・記録なし。盤面はTOURの順
@@ -313,6 +316,7 @@ function dailyList(ds) {
 function modeKey() { return settings.mode === 'DAILY' ? 'DAILY:' + todayStr() : settings.mode; }
 function modeLabel(m) {
   if (m === 'VS') return 'VS ─ ナワバリバトル';
+  if (m === 'PARTY') return 'PARTY ─ 3チーム対戦';
   if (m === 'TOUR') return 'TOUR ─ ぜんぶ巡る';
   if (m === 'DAILY') return 'DAILY ─ 今日の3面';
   if (m === 'ZEN') return 'ZEN ─ のんびりお絵かき';
@@ -320,6 +324,7 @@ function modeLabel(m) {
 }
 function modeSub(m) {
   if (m === 'VS') return 'CPUと陣地の広さで勝負。線を切り合え!';
+  if (m === 'PARTY') return '赤・黄・青の3チーム。ひとつの画面で1〜3人+CPU';
   if (m === 'TOUR') return CONFIG.TOUR.length + '種類の盤面を順番に';
   if (m === 'DAILY') return dailyList().map(k => CONFIG.SURF[k].label).join(' → ');
   if (m === 'ZEN') return 'ミスなし・敵はヌメリンだけ。音と色を楽しむモード';
@@ -821,7 +826,7 @@ function saveBest() {
   if (!(bestPct[k] >= v)) { bestPct[k] = v; store.set('qlaim.best', bestPct); }
 }
 function saveHi() {
-  if (isZen()) return;                 // ZEN は記録しない
+  if (isZen() || isParty()) return;    // ZEN・PARTY は記録しない
   if (score > hiScore) hiScore = score;
   hiScores[modeKey()] = hiScore;
   store.set('qlaim.hi3', hiScores);
@@ -1947,7 +1952,7 @@ function getSurface(key) {
 }
 function surfaceFor(lv) {
   if (settings.mode === 'DAILY') { const d = dailyList(); return d[(lv - 1) % d.length]; }
-  if (settings.mode === 'VS') return 'PLANE';
+  if (settings.mode === 'VS' || settings.mode === 'PARTY') return 'PLANE';
   if (settings.mode !== 'TOUR' && settings.mode !== 'ZEN') return settings.mode;   // ZEN はTOURと同じ順
   return CONFIG.TOUR[(lv - 1) % CONFIG.TOUR.length];
 }
@@ -2046,7 +2051,7 @@ let startHi = 0;                // ゲーム開始時のハイスコア(更新�
 let demoT = 0, demoLv = 1;      // タイトルのデモ: 背景の盤面を巡らせる
 let bonusT = 0;                 // BONUS AREA の残り時間
 let heartT = 0;                 // 心臓の鼓動の間隔
-function isBonus(lv) { lv = lv || level; return !isZen() && !isVS() && lv % CONFIG.BONUS_EVERY === 0; }
+function isBonus(lv) { lv = lv || level; return !isZen() && !hasRivals() && lv % CONFIG.BONUS_EVERY === 0; }
 // 自動軽量化: プレイ中に重い(1フレーム28ms超が続く)ときは発光を切る。設定は保存しない
 const perf = { avg: 1 / 60, slowT: 0, lite: false };
 function watchPerf(rawDt) {
@@ -2487,7 +2492,7 @@ function isBoundary(c) {
   const nb8 = surf.nb8;
   for (let m = c * 8, e = m + 8; m < e; m++) {
     const b = nb8[m];
-    if (b >= 0 && grid[b] === OPEN) return true;
+    if (b >= 0 && grid[b] !== WALL) return true;       // 描きかけの線(一時的)も空き地と同じあつかい
   }
   return false;
 }
@@ -2531,6 +2536,7 @@ function initLevel(lv) {
   player.c = s.start; player.prev = -1; player.lastDir = null;
   player.acc = 0; player.drawing = false; player.usedFast = false; player.invuln = 0; player.pts = [];
   player.fx = null; syncPos(player);
+  if (isParty()) player.invuln = Infinity;          // PARTY では通常の自機はお休み
   trail = []; trailStart = -1;
   fuseReset();
   if (surf.is3D) {
@@ -2542,7 +2548,7 @@ function initLevel(lv) {
   bonusT = bonus ? CONFIG.BONUS_TIME : 0;
   const spd = CONFIG.QIX_SPEED * diff().qix * Math.pow(CONFIG.QIX_ACCEL, lv - 1) * surf.def.qixSpeed * (bonus ? 0.6 : 1);
   qixes = [];
-  const nq = lv >= CONFIG.TWO_QIX_FROM && !isVS() ? 2 : 1;
+  const nq = lv >= CONFIG.TWO_QIX_FROM && !hasRivals() ? 2 : 1;
   for (let k = 0; k < nq; k++) qixes.push(makeQix(k, nq, spd));
 
   sparxes = [];
@@ -2551,11 +2557,12 @@ function initLevel(lv) {
   sparxTimer = CONFIG.SPARX_INTERVAL * diff().interval;
   // SEEKER は盤面ができて自機の位置が決まってから出す
   if (bonus || isZen()) sparxTimer = Infinity;
-  if (lv >= CONFIG.SEEKER_FROM && !bonus && !isZen()) for (let i = 0; i < (lv >= CONFIG.SEEKER_FROM + 4 ? 2 : 1); i++) spawnSeeker();
+  if (lv >= CONFIG.SEEKER_FROM && !bonus && !isZen() && !isParty()) for (let i = 0; i < (lv >= CONFIG.SEEKER_FROM + 4 ? 2 : 1); i++) spawnSeeker();
   // 最初からある壁(外枠・HOME)は buddy にかじられない
   baseA = new Uint8Array(surf.N);
   for (let i = 0; i < surf.N; i++) if (grid[i] === WALL) baseA[i] = 1;
-  spawnBuddiesFor(lv);
+  if (!isParty()) spawnBuddiesFor(lv); else buddies = [];
+  if (isParty()) itemTimer = Infinity;
 
   particles = []; floats = [];
   deathTimer = 0; wasSplit = false; shakeT = 0;
@@ -2997,7 +3004,7 @@ function closeTrail() {
   redrawField();
   snapPlayerToBoundary();
 
-  if (percent() >= target()) { if (isVS()) vsEnd(); else startClear(false); }
+  if (percent() >= target()) { if (isVS()) vsEnd(); else if (isParty()) partyEnd(); else startClear(false); }
 }
 
 /* ---------------- SEEKER(追跡者) ---------------- */
@@ -4120,6 +4127,138 @@ function updateQixes(dt) {
   }
 }
 
+/* ---------------- PARTY: 3チーム対戦(ひとつの画面で) ----------------
+   チームは絵の具の三原色(赤・黄・青)。人間の数は 1〜3(ロビーで選ぶ)、残りはCPU。
+   みんな同じルール: 線を切られる・囲まれる・敵に当たるとダウンして少しあとに戻る。時間切れで一番広いチームの勝ち。
+   操作(人間2人以上のとき): P1 = WASD + 左Shift / P2 = 矢印 + 右Shift(/ .) / P3 = IJKL + ](; U)。
+   ゲームパッドはつないだ順に P1, P2, P3。タブレットのスティックは P1。人間1人ならどのキーでも動かせる */
+const TEAM_COLS = [6, 5, 8];                         // INK_COLORS: 赤・黄・青
+const TEAM_NAMES = ['赤', '黄', '青'];
+const PARTY_KEYS = [
+  { u: ['KeyW'], d: ['KeyS'], l: ['KeyA'], r: ['KeyD'], f: ['ShiftLeft', 'KeyQ'] },
+  { u: ['ArrowUp'], d: ['ArrowDown'], l: ['ArrowLeft'], r: ['ArrowRight'], f: ['ShiftRight', 'Slash', 'Period'] },
+  { u: ['KeyI'], d: ['KeyK'], l: ['KeyJ'], r: ['KeyL'], f: ['BracketRight', 'Semicolon', 'KeyU'] },
+];
+const party = { humans: 2, cpu: 1 };                 // cpu: CPUの強さ 0=よわい 1=ふつう 2=つよい
+Object.assign(party, store.get('qlaim.party', {}));
+party.humans = clamp(party.humans | 0, 1, 3); party.cpu = clamp(party.cpu | 0, 0, 2);
+const CPU_LV = ['よわい', 'ふつう', 'つよい'];
+const codesDown = new Set();                         // いま押されているキー(e.code)
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('keydown', e => { if (e.code) codesDown.add(e.code); });
+  window.addEventListener('keyup', e => { if (e.code) codesDown.delete(e.code); });
+  window.addEventListener('blur', () => codesDown.clear());
+}
+// 人間 n(1〜3)の入力: { v: 向き(単位ベクトル) か null, fast }
+function humanInput(n) {
+  const sets = party.humans === 1 ? PARTY_KEYS : [PARTY_KEYS[n - 1]];
+  let x = 0, y = 0, fast = false;
+  const on = arr => arr.some(c => codesDown.has(c));
+  for (const k of sets) {
+    if (on(k.u)) y -= 1; if (on(k.d)) y += 1; if (on(k.l)) x -= 1; if (on(k.r)) x += 1;
+    if (on(k.f)) fast = true;
+  }
+  if (party.humans === 1 && (codesDown.has('KeyZ') || codesDown.has('Space'))) fast = true;
+  x = clamp(x, -1, 1); y = clamp(y, -1, 1);
+  let v = (x || y) ? [x / Math.hypot(x, y), y / Math.hypot(x, y)] : null;
+  if (n === 1 && stickVec) v = stickVec;             // タブレットのスティック
+  if (n === 1 && held.fast) fast = true;             // FAST ボタン
+  // ゲームパッド(つないだ順)
+  try {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? [...navigator.getGamepads()].filter(g => g && g.connected) : [];
+    const gp = pads[n - 1];
+    if (gp) {
+      const b = i => gp.buttons[i] && gp.buttons[i].pressed;
+      let ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+      if (b(12)) ay = -1; if (b(13)) ay = 1; if (b(14)) ax = -1; if (b(15)) ax = 1;
+      const l = Math.hypot(ax, ay);
+      if (l > 0.3) v = [ax / l, ay / l];
+      if (b(0) || b(7)) fast = true;
+    }
+  } catch (e) {}
+  return { v, fast };
+}
+function drawLobby(t) {
+  panel(70, 150, W - 140, 520);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd76b'; ctx.font = "bold 26px 'Courier New', monospace";
+  ctx.fillText('3チーム対戦', W / 2, 200);
+  const ctl = ['WASD + 左Shift', '矢印 + 右Shift', 'IJKL + ]'];
+  for (let i = 0; i < 3; i++) {
+    const y = 262 + i * 78, human = i < party.humans, col = INK_COLORS[TEAM_COLS[i]];
+    ctx.fillStyle = 'rgba(20,26,56,0.8)'; ctx.fillRect(110, y - 34, W - 220, 64);
+    ctx.fillStyle = col; ctx.fillRect(110, y - 34, 10, 64);
+    drawClawd(160, y - 2, 2.2, { col, moving: true, walkF: Math.floor(blinkT * 4 + i) & 1 });
+    ctx.textAlign = 'left'; ctx.fillStyle = col; ctx.font = "bold 20px 'Courier New', monospace";
+    ctx.fillText(TEAM_NAMES[i] + 'チーム', 205, y - 6);
+    ctx.fillStyle = '#ffffff'; ctx.font = "bold 15px 'Courier New', monospace";
+    ctx.fillText(human ? 'P' + (i + 1) + (party.humans > 1 ? '  ' + ctl[i] : '  (どのキーでも)') : 'CPU  (' + CPU_LV[party.cpu] + ')', 205, y + 18);
+  }
+  ctx.textAlign = 'center'; ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 15px 'Courier New', monospace";
+  ctx.fillText('←→ 人間の数: ' + party.humans + '人    ↑↓ CPU: ' + CPU_LV[party.cpu], W / 2, 520);
+  ctx.fillStyle = '#9dffea';
+  ctx.fillText('ゲームパッドはつないだ順に P1・P2・P3', W / 2, 548);
+  ctx.fillStyle = '#ffd76b'; ctx.font = "bold 18px 'Courier New', monospace";
+  ctx.fillText('Z / Enter / タップ でスタート    X でもどる', W / 2, 610);
+}
+function lobbyKey(k) {
+  const d = KEYDIR[k];
+  if (d === 'left') party.humans = Math.max(1, party.humans - 1);
+  else if (d === 'right') party.humans = Math.min(3, party.humans + 1);
+  else if (d === 'up') party.cpu = Math.min(2, party.cpu + 1);
+  else if (d === 'down') party.cpu = Math.max(0, party.cpu - 1);
+  else if (k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') { store.set('qlaim.party', party); startGame(); return; }
+  else if (k === 'x' || k === 'X' || k === 'Escape') { setState('title'); Snd.select(); return; }
+  if (d) { Snd.blip(); store.set('qlaim.party', party); }
+}
+// 試合終了: 陣地の広さで順位
+let partyRank = [];
+function partyEnd() {
+  if (state !== 'play') return;
+  for (const r of rivals) { for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN; r.drawing = false; r.trail = []; r.pts = []; }
+  partyRank = rivals.slice().sort((a, b) => b.area - a.area);
+  Snd.stopDraw(); Bgm.stop();
+  const top = partyRank[0];
+  if (top && top.human) Snd.clear_(0); else Snd.over();
+  sealRemaining();
+  setState('partyres');
+}
+function nextParty() { level++; initLevel(level); setState('ready'); Bgm.play(bgmName()); Snd.ready(); }
+function drawPartyRes(t) {
+  panel(90, 250, W - 180, 360);
+  ctx.textAlign = 'center';
+  const top = partyRank[0];
+  ctx.fillStyle = top ? INK_COLORS[top.col] : '#ffffff'; ctx.font = "bold 30px 'Courier New', monospace";
+  ctx.fillText(top ? TEAM_NAMES[top.id] + 'チームの勝ち!' : '引き分け', W / 2, 304);
+  partyRank.forEach((r, i) => {
+    const y = 358 + i * 52, pct = (r.area / initOpen * 100).toFixed(1);
+    ctx.fillStyle = INK_COLORS[r.col]; ctx.fillRect(140, y - 26, (W - 280) * r.area / Math.max(1, partyRank[0].area), 34);
+    ctx.fillStyle = '#10121e'; ctx.font = "bold 18px 'Courier New', monospace"; ctx.textAlign = 'left';
+    ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.id] + ' ' + r.name, 150, y - 2);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff';
+    ctx.fillText(pct + '%', W - 150, y - 2);
+    ctx.textAlign = 'center';
+  });
+  ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 15px 'Courier New', monospace";
+  if (stTimer > 0.8) ctx.fillText('Z / タップ で次のラウンド    X でタイトルへ', W / 2, 580);
+}
+function drawPartyHud() {
+  const x = 150, y = FIELD_Y + 34, w = W - 300, h = 14;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
+  ctx.fillStyle = '#2a3150'; ctx.fillRect(x, y, w, h);
+  let cx = x;
+  for (const r of rivals) { const a = r.area / initOpen * w; ctx.fillStyle = INK_COLORS[r.col]; ctx.fillRect(cx, y, a, h); cx += a; }
+  ctx.font = "bold 11px 'Courier New', monospace";
+  rivals.forEach((r, i) => {
+    ctx.textAlign = i === 0 ? 'left' : i === 1 ? 'center' : 'right';
+    ctx.fillStyle = INK_COLORS[r.col];
+    ctx.fillText(r.name + ' ' + (r.area / initOpen * 100).toFixed(1) + '%', i === 0 ? x : i === 1 ? W / 2 : x + w, y + h + 14);
+  });
+  const tm = Math.ceil(vsT);
+  ctx.textAlign = 'center'; ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
+  ctx.fillText(Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y - 8);
+}
+
 /* ---------------- CPU(ライバル) ----------------
    自機と同じことができる相手。線の上を歩き、空き地へ自由に線を引いて、自分の色で陣地を取る。
    自機の描きかけの線を狙って切りにくる。CPUの線に自機が触れる/ヌメリン・バチッコに当たる/陣地で囲まれると、
@@ -4142,6 +4281,19 @@ function makeRival(i) {
 function setupRivals(lv) {
   ownA = new Uint8Array(surf.N);
   rivals = [];
+  if (isParty() && !surf.is3D) {
+    const homes = [idx(GW >> 1, GH - 1), idx(GW >> 2, 0), idx((GW * 3) >> 2, 0)];
+    for (let t = 0; t < 3; t++) {
+      const r = makeRival(t);
+      r.home = r.c = homes[t]; r.col = TEAM_COLS[t];
+      r.human = t < party.humans ? t + 1 : 0;
+      r.name = r.human ? 'P' + r.human : 'CPU';
+      syncPos(r); rivals.push(r);
+    }
+    vsT = CONFIG.VS_TIME;
+    player.invuln = Infinity;                       // ふつうの自機はお休み(全員が同じルールのファイターになる)
+    return;
+  }
   if (!isVS() || surf.is3D) return;
   const n = lv >= 4 ? 2 : 1;
   for (let i = 0; i < n; i++) { const r = makeRival(i); syncPos(r); rivals.push(r); }
@@ -4153,10 +4305,17 @@ function rivalAreaSum() { return rivals.reduce((a, r) => a + r.area, 0); }
 function playerArea() { return claimed - rivalAreaSum(); }
 function rivalTrailCells() { return rivals.reduce((a, r) => a + r.trail.length, 0); }
 // CPU の強さ: エリアが進むほど速く、ずる賢く
-function rivalSkill() { return Math.min(1, 0.35 + (level - 1) * 0.12); }
+function rivalSkill() {
+  if (isParty()) return Math.min(1, [0.3, 0.55, 0.85][party.cpu] + (level - 1) * 0.04);
+  return Math.min(1, 0.35 + (level - 1) * 0.12);
+}
 
 function rivalStep(r, n) {
   if (n < 0) return false;
+  if (grid[n] === RTRAIL && !r.trail.includes(n)) {          // ほかのファイターの線を切る
+    const q = rivals.find(o => o !== r && o.trail.includes(n));
+    if (q) { rivalFail(q, 'cut', r); if (r.sayT <= 0 && !r.human) rivalSay(r, 'cut'); }
+  }
   const v = grid[n];
   if (!r.drawing) {
     if (v === WALL && isBoundary(n)) { r.c = n; return true; }
@@ -4191,7 +4350,7 @@ function rivalClose(r) {
   r.area += gained; claimed += gained;
   // 自機の描きかけの線が囲まれたら、自機がやられる
   if (player.drawing && trail.some(c => !visited[c])) death(r.name + 'に囲まれた');
-  for (const q of rivals) if (q !== r && q.drawing && q.trail.some(c => !visited[c])) rivalFail(q, 'trap');
+  for (const q of rivals) if (q !== r && q.drawing && q.trail.some(c => !visited[c])) rivalFail(q, 'trap', r);
   items = items.filter(it => grid[it.c] === OPEN);   // 囲まれたアイテムは消える
   crushSeekers();
   r.drawing = false; r.trail = []; r.pts = []; r.plan = []; r.fast = false;
@@ -4204,7 +4363,7 @@ function rivalClose(r) {
     Snd.splat(0.08);
     if (Math.random() < 0.4) rivalSay(r, 'claim');
   }
-  if (percent() >= target() && state === 'play') vsEnd();
+  if (percent() >= target() && state === 'play') { if (isParty()) partyEnd(); else vsEnd(); }
 }
 // 自機が陣地を取ったとき、囲まれた CPU の線はやられる
 function trapRivals() {
@@ -4218,11 +4377,11 @@ function snapActor(a) {
   for (let h = 0; h < q.length; h++) {
     const c = q[h];
     if (isBoundary(c)) { a.c = c; syncPos(a); return; }
-    for (let k = 0; k < 4; k++) { const j = surf.nb[c * 4 + k]; if (j >= 0 && !seen[j] && grid[j] === WALL) { seen[j] = 1; q.push(j); } }
+    for (let k = 0; k < 4; k++) { const j = surf.nb[c * 4 + k]; if (j >= 0 && !seen[j]) { seen[j] = 1; q.push(j); } }   // 空き地の中からでも探せるように
   }
 }
 // CPU がやられた: 線は消えて、少しあとに自分の場所から戻ってくる
-function rivalFail(r, why) {
+function rivalFail(r, why, by) {
   if (r.dead > 0) return;
   const p = r.drawing ? { x: r.fx * CS, y: FIELD_Y + r.fy * CS } : surf.screenOf(r.c);
   for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN;
@@ -4232,14 +4391,17 @@ function rivalFail(r, why) {
   spawnParticles(p.x, p.y, 34, INK_COLORS[r.col]);
   rings.push({ x: p.x, y: p.y, t: 0, col: INK_COLORS[r.col] });
   Snd.splat(0.2); Snd.bell(330, 0.06);
-  if (why === 'cut' || why === 'trap') {
+  if (isParty()) {
+    floats.push({ x: p.x, y: p.y - 16, txt: (by ? by.name + 'が' : '') + r.name + 'をダウン!', t: 1.6, col: by ? INK_COLORS[by.col] : INK_COLORS[r.col], big: true });
+    if (r.human) buzz(120, 0.8);
+  } else if (why === 'cut' || why === 'trap') {
     score += 800 * surf.def.pts;
     floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン! +' + 800 * surf.def.pts, t: 1.6, col: '#ffd76b', big: true });
     sayLine('catch', 1.2, true);
   } else floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン!', t: 1.4, col: INK_COLORS[r.col] });
 }
 function respawnRival(r) {
-  r.c = isBoundary(r.home) ? r.home : r.c;
+  r.c = r.home;                                      // スタート地点(埋もれていたら、そこから一番近い線)
   if (!isBoundary(r.c)) snapActor(r);
   syncPos(r); r.inv = 1.5; r.plan = [];
 }
@@ -4248,10 +4410,13 @@ function planRival(r) {
   if (!isBoundary(r.c)) snapActor(r);
   const sk = rivalSkill(), px = r.fx, py = r.fy;
   // 自機が線を引いていたら、近ければ切りにいく
-  if (player.drawing && trail.length > 4 && Math.random() < 0.25 + sk * 0.5) {
+  const targets = [];
+  if (player.drawing && trail.length > 4) targets.push(trail);
+  for (const o of rivals) if (o !== r && o.drawing && o.trail.length > 4) targets.push(o.trail);
+  if (targets.length && Math.random() < 0.25 + sk * 0.5) {
     let best = null, bd = 1e9;
-    for (let i = 0; i < trail.length; i += 2) {
-      const c = trail[i], x = (c % GW) + 0.5, y = ((c / GW) | 0) + 0.5, d = Math.hypot(x - px, y - py);
+    for (const tr of targets) for (let i = 0; i < tr.length; i += 2) {
+      const c = tr[i], x = (c % GW) + 0.5, y = ((c / GW) | 0) + 0.5, d = Math.hypot(x - px, y - py);
       if (d < bd) { bd = d; best = [x, y]; }
     }
     if (best && bd < 22 + sk * 30) { r.plan = [best]; r.fast = true; r.mode = 'attack'; return; }
@@ -4353,7 +4518,20 @@ function updateRivals(dt) {
     if (r.sayT > 0) r.sayT -= dt;
     if (r.dead > 0) { r.dead -= dt; if (r.dead <= 0) { r.dead = 0; respawnRival(r); } continue; }
     if (r.inv > 0) r.inv -= dt;
+    if (!r.drawing && !isBoundary(r.c)) snapActor(r);   // ほかの誰かの陣地に埋もれたら、近くの線の上へ
     syncPos(r);
+    if (r.human) {                                   // 人間: 入力の向きにそのまま進む
+      const inp = humanInput(r.human);
+      if (inp.v) {
+        r.vx = inp.v[0]; r.vy = inp.v[1]; if (r.vx < -0.3) r.look = -1; else if (r.vx > 0.3) r.look = 1;
+        const spd = (r.drawing ? (inp.fast ? CONFIG.DRAW_FAST : CONFIG.DRAW_SLOW) : CONFIG.PLAYER_SPEED) * surf.def.speed;
+        freeMove(r, inp.v, spd * dt, n => rivalStep(r, n), () => state !== 'play' || r.dead > 0);
+        if (state !== 'play') return;
+        if (r.drawing) { const lp = r.pts[r.pts.length - 1]; if (!lp || Math.hypot(r.fx - lp[0], r.fy - lp[1]) > 0.7) r.pts.push([r.fx, r.fy]); }
+      }
+      if (r.inv <= 0 && r.dead <= 0 && sparxes.some(sp => sp.c === r.c)) rivalFail(r, 'sparx');
+      continue;
+    }
     // 危ない(ヌメリンが近い)ときは、いちばん近い線へ逃げる
     const q = qixes[0];
     if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
@@ -4454,7 +4632,8 @@ function drawRivals(t) {
     drawClawd(x, y - s * 2, s, { col: INK_COLORS[r.col], moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing, look: r.look < 0 ? -1 : 1 });
     ctx.globalAlpha = 1;
     ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
-    ctx.fillText('CPU', x, y + 16);
+    ctx.fillText(r.name || 'CPU', x, y + 16);
+    if (r.human) { ctx.fillStyle = INK_COLORS[r.col]; ctx.beginPath(); ctx.moveTo(x - 5, y - 24); ctx.lineTo(x + 5, y - 24); ctx.lineTo(x, y - 18); ctx.closePath(); ctx.fill(); }
     if (r.sayT > 0) drawBubble(x, y - 14, r.sayTxt, Math.min(1, r.sayT * 3), INK_COLORS[r.col]);
   }
 }
@@ -4861,7 +5040,9 @@ function closeOptions() {
 }
 
 function onAction() {
-  if (state === 'title') startGame();
+  if (state === 'title') { if (isParty()) { setState('lobby'); Snd.select(); } else startGame(); }
+  else if (state === 'lobby') { store.set('qlaim.party', party); startGame(); }
+  else if (state === 'partyres' && stTimer > 0.8) nextParty();
   else if (state === 'clear' && stTimer > 0.8) { if (!artSaved) captureArt(); nextLevel(); }
   else if (state === 'vslose' && stTimer > 0.8) vsRetry();
   else if (state === 'ending' && stTimer > 3) finishEnding();
@@ -4999,7 +5180,7 @@ function update(dt) {
 
   // 平面: 自由移動(斜めもなめらか)
   if (!surf.is3D) {
-    const mv = freeMovePlayer(dt);
+    const mv = isParty() ? false : freeMovePlayer(dt);   // PARTY は全員ファイターとして updateRivals で動く
     if (state !== 'play') return;
     return updateWorld(dt, mv || !!inputVec());
   }
@@ -5037,7 +5218,7 @@ function updateWorld(dt, stepped) {
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
   updateBuddies(dt);
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
-  if (isVS()) { updateRivals(dt); if (state !== 'play') return; if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
+  if (hasRivals()) { updateRivals(dt); if (state !== 'play') return; if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
   if (fieldDirty) { fieldDirty = false; redrawField(); }
   updateItems(dt);
   areaTime += dt;
@@ -5048,7 +5229,7 @@ function updateWorld(dt, stepped) {
   // BONUS AREA: 時間切れでクリア(それまでの占領率でボーナス)
   if (bonusT > 0) { bonusT -= dt; if (bonusT <= 0) { bonusT = 0.001; cancelTrail(); startClear(false); bonusT = 0; return; } }
   // ナワバリバトル: 時間切れで勝負
-  if (isVS()) { vsT -= dt; if (vsT <= 0) { vsT = 0; vsEnd(); return; } }
+  if (hasRivals()) { vsT -= dt; if (vsT <= 0) { vsT = 0; if (isParty()) partyEnd(); else vsEnd(); return; } }
   updateParticles(dt);
   updateFloats(dt);
 }
@@ -5204,6 +5385,7 @@ function drawRoller(p, s, t) {
   ctx.beginPath(); ctx.moveTo(rx - px * half, ry - py * half); ctx.lineTo(rx + px * half, ry + py * half); ctx.stroke();
 }
 function drawPlayer(t) {
+  if (isParty() && state !== 'title') return;          // PARTY はファイターだけ
   const p = playerScreen(), s = 2;
   if (deathTimer > 0) { // くるくる回って小さくなる
     ctx.save();
@@ -5424,9 +5606,10 @@ function render() {
   drawBuddies();
   if (rivals.length && !surf.is3D) drawRivals(t);
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
+  if (isParty() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause' || state === 'partyres')) drawPartyHud();
   if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state)) drawBackView(t);
   if (state === 'play' || state === 'ready' || state === 'pause') drawStatus();
-  if (tutorStep >= 0 && (state === 'play' || state === 'ready')) drawTutor(t);
+  if (tutorStep >= 0 && !hasRivals() && (state === 'play' || state === 'ready')) drawTutor(t);   // 対戦モードは上のバーと重なるので出さない
 
   // インクのしずく(ふつうの合成)
   for (const p of particles) {
@@ -6221,6 +6404,8 @@ function renderOverlay() {
     return;
   }
 
+  if (state === 'lobby') { drawLobby(t); return; }
+  if (state === 'partyres') { drawPartyRes(t); return; }
   if (state === 'vslose') {
     panel(90, 300, W - 180, 220);
     ctx.textAlign = 'center';
@@ -6391,6 +6576,12 @@ function onKeyDown(e) {
     e.preventDefault(); return;
   }
 
+  if (state === 'lobby') { lobbyKey(k); e.preventDefault(); return; }
+  if (state === 'partyres') {
+    if ((k === 'x' || k === 'X' || k === 'Escape') && stTimer > 0.5) backToTitle();
+    else if ((k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') && stTimer > 0.8) nextParty();
+    e.preventDefault(); return;
+  }
   if (state === 'help') {
     if (k === 'z' || k === 'Z' || k === 'x' || k === 'X' || k === 'Escape' || k === 'Enter' || k === ' ' || k === 'h' || k === 'H' || k === 'p' || k === 'P') closeHelp();
     e.preventDefault(); return;

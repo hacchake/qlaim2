@@ -10,7 +10,7 @@ const DIRS = ['up','down','left','right'];
 const NL = String.fromCharCode(10);
 let problems = [], frames = 0;
 function countOpen(){ let n=0; for (let i=0;i<surf.N;i++) if (grid[i]===OPEN) n++; return n; }
-for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PLANE','CUBE','SPHERE','GSD','KLEIN','MOBIUS','KNOT','TORUS','TRUNC_ICOSA'])) {
+for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PARTY','PARTY','PLANE','CUBE','SPHERE','GSD','KLEIN','MOBIUS','KNOT','TORUS','TRUNC_ICOSA'])) {
   settings.mode = md;
   for (let game = 0; game < 2; game++) {
     startGame(); stTimer = 2; tickMeta(0.016);
@@ -23,6 +23,10 @@ for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PLANE','CUBE','SPHERE','G
         d = DIRS[(Math.random()*4)|0]; pressDir(d); held.fast = Math.random() < 0.4;
         if (Math.random() < 0.35) pressDir(d === 'up' || d === 'down' ? (Math.random() < 0.5 ? 'left' : 'right') : (Math.random() < 0.5 ? 'up' : 'down'));   // 斜め
         const an = Math.random() * 6.283; stickVec = Math.random() < 0.3 ? [Math.cos(an), Math.sin(an)] : null;          // アナログ
+        if (typeof codesDown !== 'undefined') {                  // PARTY: P1〜P3 のキーもでたらめに
+          codesDown.clear();
+          for (const k of ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyI','KeyJ','KeyK','KeyL','ShiftLeft','ShiftRight']) if (Math.random() < 0.18) codesDown.add(k);
+        }
       }
       try {
         tickMeta(1/60); blinkT += 1/60; stTimer += 1/60;
@@ -31,13 +35,15 @@ for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PLANE','CUBE','SPHERE','G
         else if (state === 'ready' && stTimer > 2) setState('play');
         else if (state === 'entry') entryNext();
         else if (state === 'vslose' && stTimer > 1) vsRetry();
+        else if (state === 'partyres' && stTimer > 1) nextParty();
         else if (state === 'over') { if (stTimer > 1) break; }
         if (f % 97 === 0) render();
       } catch (e) { problems.push(md + ' f' + f + ' ' + e.stack.split(NL).slice(0,4).join(' | ')); break; }
       if (state === 'play' && claimed !== initOpen - countOpen() - trail.length - rivalTrailCells()) {
         problems.push(md + ' 整合 claimed=' + claimed + ' vs ' + (initOpen - countOpen() - trail.length - rivalTrailCells()) + ' lv' + level); break;
       }
-      if (state === 'play' && !player.drawing && !isBoundary(player.c) && deathTimer <= 0) { problems.push(md + ' 自機が線の外 lv' + level + ' c=' + player.c + ' prev=' + player.prev); break; }
+      for (const r of (state === 'play' ? rivals : [])) { if (!r.drawing && r.dead <= 0 && !isBoundary(r.c)) { if ((r.offN = (r.offN || 0) + 1) > 2) { problems.push(md + ' ファイターが線の外 ' + r.name + ' c=' + r.c); break; } } else r.offN = 0; }
+      if (state === 'play' && !isParty() && !player.drawing && !isBoundary(player.c) && deathTimer <= 0) { problems.push(md + ' 自機が線の外 lv' + level + ' c=' + player.c + ' prev=' + player.prev); break; }
     }
     for (const k of DIRS) releaseDir(k); stickVec = null;
   }

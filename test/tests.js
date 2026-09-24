@@ -1505,5 +1505,46 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('VSの自機の色はオレンジで固定', inkHex() === INK_COLORS[0]);
 }
 
+
+// ---- 95) PARTY: 3チーム対戦 ----
+{
+  settings.mode = 'PARTY'; backToTitle();
+  onAction(); assert('PARTY: タイトルで決定するとロビー', state === 'lobby');
+  party.humans = 1; lobbyKey('ArrowRight'); lobbyKey('ArrowRight'); lobbyKey('ArrowRight');
+  assert('ロビー: 人間は3人まで', party.humans === 3);
+  lobbyKey('ArrowLeft'); lobbyKey('ArrowUp'); lobbyKey('ArrowUp'); lobbyKey('ArrowUp');
+  assert('ロビー: CPUの強さは3段階', party.humans === 2 && party.cpu === 2);
+  let err = null; try { render(); } catch (e) { err = e.stack; } assert('ロビーの描画', !err, err);
+  lobbyKey('z');
+  assert('スタートで3チーム(人間2+CPU1)', state === 'ready' && rivals.length === 3 && rivals[0].human === 1 && rivals[1].human === 2 && rivals[2].human === 0);
+  assert('チームの色は赤・黄・青', rivals.map(r => INK_COLORS[r.col]).join() === [INK_COLORS[6], INK_COLORS[5], INK_COLORS[8]].join());
+  setState('play'); sparxes = [];
+  // P2 は矢印キーで動く(P1 は動かない)
+  const p1 = [rivals[0].fx, rivals[0].fy], p2 = [rivals[1].fx, rivals[1].fy];
+  codesDown.add('ArrowDown'); codesDown.add('ArrowRight');
+  for (let i = 0; i < 30; i++) update(1 / 60);
+  codesDown.clear();
+  assert('P2は矢印キーで斜めに動いて線を引く', rivals[1].drawing && rivals[1].fx > p2[0] + 1 && rivals[1].fy > p2[1] + 1);
+  assert('P1は動かない', rivals[0].fx === p1[0] && rivals[0].fy === p1[1]);
+  // P1 が WASD で P2 の線を切る
+  const q = rivals[1], hitCell = q.trail[Math.floor(q.trail.length / 2)];
+  const r1 = rivals[0]; r1.c = surf.nb[hitCell * 4 + 3] >= 0 ? surf.nb[hitCell * 4 + 3] : hitCell; r1.drawing = true; r1.trail = [];
+  rivalStep(r1, hitCell);
+  assert('ほかのチームの線に入ると、その線を切る', q.dead > 0);
+  // 人間1人ならどのキーでも
+  party.humans = 1; codesDown.add('KeyL');
+  assert('人間1人ならIJKLでも動ける', humanInput(1).v && humanInput(1).v[0] === 1); codesDown.clear();
+  party.humans = 2;
+  // 試合終了と順位
+  rivals[0].area = 30; rivals[1].area = 50; rivals[2].area = 10;
+  partyEnd();
+  assert('時間切れで順位(黄=P2が1位)', state === 'partyres' && partyRank[0] === rivals[1] && partyRank[2] === rivals[2]);
+  err = null; try { render(); } catch (e) { err = e.stack; } assert('結果画面の描画', !err, err);
+  stTimer = 1; onKeyDown({ key: 'z', preventDefault() {} });
+  assert('Zで次のラウンド', state === 'ready' && level === 2 && rivals.length === 3);
+  assert('PARTYでは記録を残さない・buddyなし', buddies.length === 0);
+  settings.mode = 'VS';
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);
