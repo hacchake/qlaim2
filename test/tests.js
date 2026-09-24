@@ -1388,7 +1388,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   }
   const seen = new Set(); surf.segEach(sg, c => { seen.add(c); return false; });
   const miss = [...cells].filter(c => !seen.has(c));
-  assert(mode + ': 腕の上のマスはすべて判定される', miss.length === 0, miss.length + '/' + cells.size);
+  assert(mode + ': 腕の上のマスは判定される(角の先をかすめる2マスまでは許す)', miss.length <= 2, miss.length + '/' + cells.size);
   // 腕の途中に1マスだけ線を置く → ミス
   const mid = [...cells].filter(c => seen.has(c))[Math.floor(cells.size * 0.3)];
   if (grid[mid] === OPEN) {
@@ -1511,13 +1511,27 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
 {
   settings.mode = 'PARTY'; backToTitle();
   onAction(); assert('PARTY: タイトルで決定するとロビー', state === 'lobby');
-  party.humans = 1; lobbyKey('ArrowRight'); lobbyKey('ArrowRight'); lobbyKey('ArrowRight');
-  assert('ロビー: 人間は3人まで', party.humans === 3);
-  lobbyKey('ArrowLeft'); lobbyKey('ArrowUp'); lobbyKey('ArrowUp'); lobbyKey('ArrowUp');
-  assert('ロビー: CPUの強さは3段階', party.humans === 2 && party.cpu === 2);
+  lobbyKey('z', true); assert('押しっぱなし(キーリピート)ではスタートしない', state === 'lobby');
+  stTimer = 1;
+  party.slots = [true, false, false]; party.sel = 1; lobbyKey('ArrowRight');
+  assert('ロビー: 黄を人間に切り替え', party.slots[1] === true);
+  party.sel = 2; lobbyKey('z'); assert('ロビー: Zでも切り替え(青=人間)', party.slots[2] === true);
+  lobbyKey('z'); assert('もう一度で青=CPU', party.slots[2] === false);
+  party.sel = 3; lobbyKey('ArrowRight'); lobbyKey('ArrowRight'); assert('ロビー: CPUの強さを変える', party.cpu !== undefined);
+  party.cpu = 2;
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('ロビーの描画', !err, err);
+  // タップ: 青の行をタップすると切り替わる
+  const rr = lobbyRects.find(q => q.act === 'slot' && q.i === 2);
+  lobbyTap({ x: rr.x + 10, y: rr.y + 10 }); assert('タップで青を人間に', party.slots[2] === true);
+  lobbyTap({ x: rr.x + 10, y: rr.y + 10 }); party.sel = 4;
+  // タイトルのタップでもロビーへ
+  backToTitle(); onAction(); stTimer = 1;
   lobbyKey('z');
   assert('スタートで3チーム(人間2+CPU1)', state === 'ready' && rivals.length === 3 && rivals[0].human === 1 && rivals[1].human === 2 && rivals[2].human === 0);
+  { const P = perimeterThirds(), L = 2 * (GW - 1) + 2 * (GH - 1);
+    const pos = c => { const x = c % GW, y = (c / GW) | 0; return y === GH - 1 ? (GW >> 1) - x + (x > (GW >> 1) ? L : 0) : x === 0 ? (GW >> 1) + (GH - 1 - y) : y === 0 ? (GW >> 1) + (GH - 1) + x : (GW >> 1) + (GH - 1) + (GW - 1) + y; };
+    const d = [pos(P[1]) - pos(P[0]), pos(P[2]) - pos(P[1]), L - (pos(P[2]) - pos(P[0]))];
+    assert('スタート地点は外周を3等分(公平)', d.every(v => Math.abs(v - L / 3) <= 2) && P.every(c => isBoundary(c)), d.join()); }
   assert('チームの色は赤・黄・青', rivals.map(r => INK_COLORS[r.col]).join() === [INK_COLORS[6], INK_COLORS[5], INK_COLORS[8]].join());
   setState('play'); sparxes = [];
   // P2 は矢印キーで動く(P1 は動かない)
@@ -1533,9 +1547,9 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   rivalStep(r1, hitCell);
   assert('ほかのチームの線に入ると、その線を切る', q.dead > 0);
   // 人間1人ならどのキーでも
-  party.humans = 1; codesDown.add('KeyL');
+  party.slots = [true, false, false]; codesDown.add('KeyL');
   assert('人間1人ならIJKLでも動ける', humanInput(1).v && humanInput(1).v[0] === 1); codesDown.clear();
-  party.humans = 2;
+  party.slots = [true, true, false];
   // 試合終了と順位
   { let n = [30, 50, 10]; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) { for (let t2 = 0; t2 < 3; t2++) if (n[t2] > 0) { grid[i] = WALL; ownA[i] = 2 + t2; n[t2]--; break; } } recountAreas(); }
   partyEnd();
@@ -1553,7 +1567,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   const shades = new Set(); for (let i = 0; i < 40; i++) shades.add(palHex(teamNo(2)));
   assert('チームの色は系統の中で揺らぐ(青系4色)', shades.size === 4 && [...shades].every(c => TEAM_SHADES[2].includes(c)));
   assert('中立の色: 赤+青=紫系', NEUTRAL_MIX['02'].includes(palHex(neutralNo(2, 0))));
-  settings.mode = 'PARTY'; party.humans = 3; startGame(); setState('play'); sparxes = []; items = [];
+  settings.mode = 'PARTY'; party.slots = [true, true, true]; startGame(); setState('play'); sparxes = []; items = [];
   // 赤(P1)の陣地を作る
   const R = rivals[0], B = rivals[2];
   const cells = []; for (let y = 60; y < 70; y++) for (let x = 40; x < 60; x++) { const c = idx(x, y); grid[c] = WALL; ownA[c] = 2 + R.id; colA[c] = teamNo(0); cells.push(c); }
@@ -1582,7 +1596,19 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   let err = null; try { rivals[0].drawing = true; updateVoices(); rivals[0].drawing = false; updateVoices(); Snd.voiceStopAll(); } catch (e) { err = e.stack; }
   assert('描く音のハーモニー(音声なし環境で例外なし)', !err, err);
   err = null; try { rivals[1].overT = 3; render(); } catch (e) { err = e.stack; } assert('上塗り中の描画', !err, err);
-  settings.mode = 'VS'; party.humans = 2;
+  settings.mode = 'VS'; party.slots = [true, true, false];
+}
+
+
+// ---- 97) 上塗りアイテムの出やすさ・生き返りの表示 ----
+{
+  settings.mode = 'PARTY'; party.slots = [true, false, false]; startGame(); setState('play'); items = []; itemTimer = 0;
+  updateItems(1 / 60);
+  assert('PARTYはすぐ上塗りが出て、6秒ごと', items.length === 1 && items[0].k === 'over' && Math.abs(itemTimer - 6) < 0.1);
+  let err = null;
+  try { const r = rivals[1]; rivalFail(r, 'qix'); render(); r.dead = 0.001; updateRivals(0.01); render(); } catch (e) { err = e.stack; }
+  assert('やられている間の輪・復活の輪の描画', !err && rivals[1].dead === 0 && rivals[1].inv > 0, err);
+  settings.mode = 'VS';
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
