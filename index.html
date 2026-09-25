@@ -328,7 +328,7 @@ function modeLabel(m) {
   return CONFIG.SURF[m].label;
 }
 function modeSub(m) {
-  if (m === 'VS') return 'CPU3人以上と全員敵同士。いちばん広い陣地を取れ!';
+  if (m === 'VS') return '全員敵同士。決定でステージ・ルール・CPUを選ぶ';
   if (m === 'PARTY') return '赤・黄・青の3チーム。ひとつの画面で1〜3人+CPU';
   if (m === 'TOUR') return CONFIG.TOUR.length + '種類の盤面を順番に';
   if (m === 'DAILY') return dailyList().map(k => CONFIG.SURF[k].label).join(' → ');
@@ -713,7 +713,7 @@ const store = (() => {
 
 const settings = Object.assign(
   { bgm: 6, sfx: 7, diff: 'NORMAL', lives: CONFIG.LIVES, theme: THEMES.length, crt: true, mode: 'VS', music: 'AUTO', shake: true, glow: true, ink: 'MIX', claimSnd: 'MIX',
-    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR' },
+    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3 },
   store.get('qlaim.settings', {})
 );
 if (!DIFFS[settings.diff]) settings.diff = 'NORMAL';
@@ -4611,13 +4611,18 @@ const CPU_SKILL = [0.3, 0.55, 0.85, 1.15, 1.6];
 const MATCH_TIMES = [60, 90, 120, 180];
 const STAGE_OPTS = ['TOUR', 'RANDOM'].concat(Object.keys(CONFIG.SURF));
 function matchTime() { return MATCH_TIMES.includes(+settings.matchTime) ? +settings.matchTime : 90; }
+// ナワバリバトルのルール: TIME = 時間制(時間切れで一番広い人の勝ち) / STOCK = 残機制(時間なし。残機がなくなると脱落)
+function isStock() { return isVS() && settings.vsRule === 'STOCK'; }
+function vsStock() { return clamp(+settings.vsStock | 0 || 3, 1, 5); }
 let stageOrder = Object.keys(CONFIG.SURF);
 function shuffleStages() { stageOrder = Object.keys(CONFIG.SURF).sort(() => Math.random() - 0.5); }
 function stageLabel(st) { return st === 'TOUR' ? 'TOURの順' : st === 'RANDOM' ? 'ランダム' : CONFIG.SURF[st] ? CONFIG.SURF[st].label : st; }
 const MATCH_ITEMS = [
   { k:'vsCpu',     label:'VSのCPUの数',  vals:['AUTO', '1', '2', '3', '4', '5', '6', '7'] },
   { k:'cpuLv',     label:'VSのCPUの強さ', vals:['AUTO'].concat(CPU_LV) },
+  { k:'vsRule',    label:'VSのルール',    vals:['TIME', 'STOCK'] },
   { k:'matchTime', label:'試合時間',      vals:MATCH_TIMES },
+  { k:'vsStock',   label:'VSの残機',      vals:[1, 2, 3, 4, 5] },
   { k:'stageSel',  label:'ステージ',      vals:STAGE_OPTS },
   { k:'_keys',     label:'キーコンフィグ' },
   { k:'_back',     label:'もどる' },
@@ -4634,14 +4639,14 @@ function matchAdjust(dir) {
   Snd.blip(); saveSettings();
 }
 function drawMatchOpts(t) {
-  panel(60, 150, W - 120, 470);
+  panel(60, 150, W - 120, 540);
   ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff'; ctx.font = "bold 26px 'Courier New', monospace";
   ctx.fillText('対戦の設定', W / 2, 200);
   matchRects = [];
   MATCH_ITEMS.forEach((it, i) => {
-    const y = 262 + i * 52, sel = i === matchSel;
-    matchRects.push({ x: 90, y: y - 26, w: W - 180, h: 42, idx: i });
-    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(90, y - 26, W - 180, 42);
+    const y = 250 + i * 44, sel = i === matchSel;
+    matchRects.push({ x: 90, y: y - 24, w: W - 180, h: 38, idx: i });
+    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(90, y - 24, W - 180, 38);
     ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#ffffff' : '#aab6dd'; ctx.font = "bold 17px 'Courier New', monospace";
     ctx.fillText(it.label, 110, y + 2);
     ctx.textAlign = 'right';
@@ -4649,11 +4654,13 @@ function drawMatchOpts(t) {
     if (it.k === 'stageSel') v = stageLabel(settings.stageSel);
     else if (it.k === 'matchTime') v = matchTime() + '秒';
     else if (it.k === 'vsCpu') v = settings.vsCpu === 'AUTO' ? 'AUTO(3〜7)' : settings.vsCpu + '人';
+    else if (it.k === 'vsRule') v = settings.vsRule === 'STOCK' ? '残機制' : '時間制';
+    else if (it.k === 'vsStock') v = vsStock() + '機';
     else if (it.vals) v = String(settings[it.k]);
     if (v) ctx.fillText('◀ ' + v + ' ▶', W - 110, y + 2);
   });
   ctx.textAlign = 'center'; ctx.fillStyle = '#6d7ba8'; ctx.font = "bold 13px 'Courier New', monospace";
-  ctx.fillText('↑↓ えらぶ / ←→ かえる / X もどる', W / 2, 600);
+  ctx.fillText('↑↓ えらぶ / ←→ かえる / X もどる', W / 2, 668);
 }
 // キーコンフィグ: P1〜P3 の ↑↓←→ と「速く」。えらんで Z を押してから、使いたいキーを押す
 const KEY_ACTS = [['u', '↑'], ['d', '↓'], ['l', '←'], ['r', '→'], ['f', '速く']];
@@ -4708,6 +4715,78 @@ function keyCfgKey(e) {
 function p1Dir(code) {
   const m = PARTY_KEYS[0];
   return m.u.includes(code) ? 'up' : m.d.includes(code) ? 'down' : m.l.includes(code) ? 'left' : m.r.includes(code) ? 'right' : null;
+}
+
+/* ---- ナワバリバトルの準備画面 ----
+   タイトルで VS を選んで決定すると、まずこの画面。ステージ・ルール・時間か残機・CPUの数・強さを選んでスタート */
+const VSSET_ITEMS = [
+  { k:'stageSel', label:'ステージ' },
+  { k:'vsRule',   label:'ルール' },
+  { k:'_amount',  label:'' },                        // 時間制なら試合時間、残機制なら残機の数
+  { k:'vsCpu',    label:'CPUの数' },
+  { k:'cpuLv',    label:'CPUの強さ' },
+  { k:'_start',   label:'スタート' },
+];
+let vsSel = 5, vsRects = [];
+function vsSetDo(i, dir) {
+  const it = VSSET_ITEMS[i];
+  if (it.k === '_start') { saveSettings(); startGame(); return; }
+  const cyc = (k, vals) => { let j = vals.findIndex(v => String(v) === String(settings[k])); if (j < 0) j = 0; settings[k] = vals[(j + dir + vals.length) % vals.length]; };
+  if (it.k === 'stageSel') cyc('stageSel', STAGE_OPTS);
+  else if (it.k === 'vsRule') cyc('vsRule', ['TIME', 'STOCK']);
+  else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') cyc('vsStock', [1, 2, 3, 4, 5]); else cyc('matchTime', MATCH_TIMES); }
+  else if (it.k === 'vsCpu') cyc('vsCpu', ['AUTO', '1', '2', '3', '4', '5', '6', '7']);
+  else if (it.k === 'cpuLv') cyc('cpuLv', ['AUTO'].concat(CPU_LV));
+  Snd.blip(); saveSettings();
+}
+function drawVsSetup(t) {
+  panel(50, 120, W - 100, 610);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#ffd76b'; ctx.font = "bold 26px 'Courier New', monospace";
+  ctx.fillText('ナワバリバトル', W / 2, 166);
+  ctx.fillStyle = '#aab6dd'; ctx.font = "bold 13px 'Courier New', monospace";
+  ctx.fillText('全員敵同士。いちばん広い陣地を取れ!', W / 2, 190);
+  vsRects = [];
+  VSSET_ITEMS.forEach((it, i) => {
+    const y = 250 + i * 70, sel = i === vsSel;
+    if (it.k === '_start') {
+      vsRects.push({ x: W / 2 - 130, y: y - 30, w: 260, h: 52, i });
+      ctx.fillStyle = sel ? '#ffd76b' : '#8a7a3a'; ctx.fillRect(W / 2 - 130, y - 30, 260, 52);
+      ctx.fillStyle = '#10121e'; ctx.font = "bold 22px 'Courier New', monospace"; ctx.textAlign = 'center';
+      ctx.fillText('スタート', W / 2, y + 4);
+      return;
+    }
+    vsRects.push({ x: 80, y: y - 30, w: W - 160, h: 56, i });
+    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(80, y - 30, W - 160, 56);
+    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 29, W - 162, 54); }
+    let label = it.label, v = '', sub = '';
+    if (it.k === 'stageSel') { v = stageLabel(settings.stageSel); sub = settings.stageSel === 'TOUR' ? '平面 → 立方体 → 球 … とラウンドごとに進む' : settings.stageSel === 'RANDOM' ? 'ラウンドごとにランダム' : (CONFIG.SURF[settings.stageSel] || {}).sub || ''; }
+    else if (it.k === 'vsRule') { v = settings.vsRule === 'STOCK' ? '残機制' : '時間制'; sub = settings.vsRule === 'STOCK' ? '時間なし。残機がなくなると脱落。最後まで残れ!' : '時間切れのとき、いちばん広い人の勝ち'; }
+    else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') { label = '残機'; v = vsStock() + '機'; sub = 'CPUも同じ数'; } else { label = '試合時間'; v = matchTime() + '秒'; } }
+    else if (it.k === 'vsCpu') { v = settings.vsCpu === 'AUTO' ? 'AUTO' : settings.vsCpu + '人'; sub = settings.vsCpu === 'AUTO' ? '3人から、2ラウンドごとに1人ずつ増える(7人まで)' : ''; }
+    else if (it.k === 'cpuLv') { v = settings.cpuLv === 'AUTO' ? 'AUTO' : settings.cpuLv; sub = settings.cpuLv === 'AUTO' ? 'ラウンドが進むほど強くなる' : settings.cpuLv === '悪魔' ? 'これ以上ない強さ' : ''; }
+    ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#ffffff' : '#cdd8ff'; ctx.font = "bold 18px 'Courier New', monospace";
+    ctx.fillText(label, 100, y - (sub ? 4 : -4));
+    ctx.textAlign = 'right'; ctx.fillText('◀ ' + v + ' ▶', W - 100, y - (sub ? 4 : -4));
+    if (sub) { ctx.textAlign = 'left'; ctx.fillStyle = '#8fa3d9'; ctx.font = "12px 'Courier New', monospace"; ctx.fillText(sub, 100, y + 17); }
+  });
+  ctx.textAlign = 'center'; ctx.fillStyle = '#6d7ba8'; ctx.font = "bold 12px 'Courier New', monospace";
+  ctx.fillText('↑↓ えらぶ / ←→ かえる / Z スタート / O キーコンフィグなど / X もどる', W / 2, 712);
+}
+function vsSetKey(k, rep2) {
+  if (rep2 || stTimer < 0.25) return;
+  const d = KEYDIR[k];
+  if (d === 'up') { vsSel = (vsSel + VSSET_ITEMS.length - 1) % VSSET_ITEMS.length; Snd.blip(); }
+  else if (d === 'down') { vsSel = (vsSel + 1) % VSSET_ITEMS.length; Snd.blip(); }
+  else if (d === 'left' || d === 'right') { if (VSSET_ITEMS[vsSel].k !== '_start') vsSetDo(vsSel, d === 'left' ? -1 : 1); }
+  else if (k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') vsSetDo(vsSel, 1);
+  else if (k === 'x' || k === 'X' || k === 'Escape') { setState('title'); Snd.select(); }
+  else if (k === 'o' || k === 'O') openMatchOpts('vssetup');
+}
+function vsSetTap(p) {
+  const r = vsRects.find(q => inRect(p, q));
+  if (!r) return;
+  vsSel = r.i;
+  vsSetDo(r.i, VSSET_ITEMS[r.i].k === '_start' ? 1 : p.x < W / 2 ? -1 : 1);
 }
 
 /* ---------------- 上塗り ----------------
@@ -4997,6 +5076,7 @@ function makeRival(i) {
   const home = idx(i ? (GW * 3) >> 2 : GW >> 2, 0);
   return { id: i, team: (i + 1) % NT, c: home, home, fx: 0, fy: 0, vx: 0, vy: 1, look: 1, drawing: false, trail: [], pts: [], plan: [], fast: false,
            dead: 0, inv: 1.5, area: 0, stuck: 0, think: rand(0.3, 1.0), sayTxt: '', sayT: 0, kills: 0, downs: 0, combo: 0, comboT: 0,
+           stock: isStock() ? vsStock() : Infinity, out: false,
            col: RIVAL_COLS[i % RIVAL_COLS.length], name: RIVAL_NAMES[(i + 1) % RIVAL_NAMES.length] };
 }
 // 外周を1周する順のマス(下の真ん中から時計回り)を3等分した場所 = 3人のスタート地点(どこからでも公平)
@@ -5012,6 +5092,8 @@ function perimeterSplit(n) {
   return Array.from({ length: n }, (_, k) => ring[Math.round(k * L / n) % L]);
 }
 function setupRivals(lv) {
+  pendingEnds = [];
+  if (isStock() && state !== 'title') { lives = vsStock() - 1; player.out = false; }   // 残機制: 画面の♥は「あと何回」なので -1
   vsStat = { kills: 0, downs: 0 }; banterT = rand(5, 9); banterQ = [];
   ownA = new Uint8Array(surf.N); neutralAt = new Float32Array(surf.N).fill(-99); rtOwn = new Uint8Array(surf.N);
   Snd.voiceStopAll();
@@ -5174,6 +5256,14 @@ function rivalFail(r, why, by) {
   for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN;
   r.drawing = false; r.trail = []; r.pts = []; r.plan = [];
   r.dead = CONFIG.RIVAL_RESPAWN;
+  if (isStock()) {                                   // 残機制: 残機が減り、なくなったら脱落
+    r.stock--;
+    if (r.stock <= 0) {
+      r.out = true; r.dead = 1e9;
+      floats.push({ x: W / 2, y: FIELD_Y + 150, txt: r.name + ' 脱落!', t: 2.0, col: teamHex(r.team), big: true });
+      if (rivals.every(q => q.out) && state === 'play') setTimeout0(() => vsEnd());
+    }
+  }
   rivalSay(r, 'down');
   spawnParticles(p.x, p.y, 34, teamHex(r.team));
   rings.push({ x: p.x, y: p.y, t: 0, col: teamHex(r.team) });
@@ -5187,6 +5277,8 @@ function rivalFail(r, why, by) {
     sayLine('catch', 1.2, true);
   } else floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン!', t: 1.4, col: teamHex(r.team) });
 }
+function setTimeout0(fn) { pendingEnds.push(fn); }       // その場で終わらせず、更新の最後で(ループの途中で盤面を片付けないように)
+let pendingEnds = [];
 function respawnRival(r) {
   if (Math.random() < 0.5) rivalSay(r, 'respawn');
   const hp = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS }, hx = hp.x, hy = hp.y;
@@ -5406,13 +5498,13 @@ function qixHitsRival(q) {
   }
 }
 // 勝負あり: 陣地の広さをくらべる
-function vsEnd() {
+function vsEnd(playerOut) {
   if (state !== 'play') return;
   Snd.voiceStopAll();
   cancelTrail();
   for (const r of rivals) { for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN; r.drawing = false; r.trail = []; r.pts = []; }
   const me = playerArea(), best = Math.max(0, ...rivals.map(r => r.area));
-  vsWin = me > best;                                 // 全員敵同士: 自分がいちばん広ければ勝ち
+  vsWin = !playerOut && (me > best || (isStock() && rivals.length && rivals.every(r => r.out)));   // 全員敵同士: 自分がいちばん広い(残機制は最後まで残っても)勝ち
   vsResult = { win: vsWin, rank: vsRanking().map(e => Object.assign({}, e)) };
   if (vsWin) { startClear(false); artSaved = false; setState('vsres'); }        // 得点・記録は勝ちと同じ。画面は結果表
   else { Snd.stopDraw(); Bgm.stop(); Snd.over(); sealRemaining(); setState('vsres'); }
@@ -5519,7 +5611,7 @@ function drawVsRes(t) {
   const end = drawResultTable(r.rank, 170, r.win ? 'WIN!  1位!' : 'LOSE…  ' + my + '位', r.win ? '#7bffa0' : '#ff8fa8');
   ctx.textAlign = 'center'; ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 15px 'Courier New', monospace";
   if (stTimer > 1.4) ctx.fillText(r.win ? 'Z / タップ で次のラウンドへ (' + CONFIG.SURF[surfaceFor(level + 1)].label + ')'
-                                   : lives > 0 ? 'Z / タップ でもう一度 (残機 -1)' : 'Z / タップ で おしまい', W / 2, end + 30);
+                                   : isStock() ? 'Z / タップ でもう一度    P → タイトルへ' : lives > 0 ? 'Z / タップ でもう一度 (残機 -1)' : 'Z / タップ で おしまい', W / 2, end + 30);
 }
 function drawVsHud() {
   const x = 120, y = FIELD_Y + 34, w = W - 240, h = 14;
@@ -5531,21 +5623,22 @@ function drawVsHud() {
   ctx.fillStyle = '#8a8fa8'; ctx.fillRect(cx, y, w * neutralArea() / initOpen, h);
   const myRank = rk.findIndex(e => e.me) + 1;
   // バーの下: 色ごとの割合(自分・CPU の並び順のまま。自分は白い枠)
-  const all = [{ me: true, name: 'YOU', area: playerArea(), col: teamHex(0) }].concat(rivals.map(r => ({ name: r.name, area: r.area, col: teamHex(r.team) })));
+  const all = [{ me: true, name: 'YOU', area: playerArea(), col: teamHex(0), stock: lives + 1 }].concat(rivals.map(r => ({ name: r.name, area: r.area, col: teamHex(r.team), stock: r.stock, out: r.out })));
   const cw = (w + 60) / all.length;
   ctx.font = "bold " + (all.length > 6 ? 10 : 11) + "px 'Courier New', monospace"; ctx.textAlign = 'center';
   all.forEach((e, i) => {
     const cx2 = x - 30 + cw * (i + 0.5), ty = y + h + 14;
     ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(cx2 - cw / 2 + 2, ty - 11, cw - 4, 15);
     if (e.me) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.strokeRect(cx2 - cw / 2 + 2.5, ty - 10.5, cw - 5, 14); }
-    ctx.fillStyle = e.col; ctx.fillText((e.me ? 'YOU ' : '') + (e.area / initOpen * 100).toFixed(1) + '%', cx2, ty);
+    ctx.fillStyle = e.out ? '#666a80' : e.col; ctx.fillText((e.me ? 'YOU ' : '') + (e.out ? '脱落' : (e.area / initOpen * 100).toFixed(1) + '%'), cx2, ty);
+    if (isStock() && !e.out) { ctx.fillStyle = e.col; ctx.fillText('♥'.repeat(Math.max(0, Math.min(5, e.stock | 0))), cx2, ty + 14); }
   });
   ctx.textAlign = 'left'; ctx.fillStyle = myRank === 1 ? '#7bffa0' : '#ffffff'; ctx.font = "bold 12px 'Courier New', monospace";
   ctx.fillText(myRank + '位/' + rk.length + '人', x - 110, y + 12);
   ctx.textAlign = 'center';
   const tm = Math.ceil(vsT);
   ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
-  ctx.fillText(Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y - 8);   // 残り時間はバーの上(下は色ごとの割合)
+  ctx.fillText(isStock() ? '残機制' : Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y - 8);   // 残り時間はバーの上(下は色ごとの割合)
 }
 
 /* ---------------- SPARX ---------------- */
@@ -5654,6 +5747,7 @@ function applyDeath() {
   fuseReset();
   if (trailStart >= 0) { player.c = trailStart; player.prev = -1; }
   snapPlayerToBoundary();
+  if (lives < 0 && isStock()) { lives = 0; player.out = true; vsEnd(true); return; }   // 残機制: 脱落 = この試合は負け
   if (lives < 0) {
     saveHi();
     entry.rank = -1;
@@ -5938,11 +6032,16 @@ function closeOptions() {
 }
 
 function onAction() {
-  if (state === 'title') { if (isParty()) { party.sel = 5; setState('lobby'); Snd.select(); } else startGame(); }
+  if (state === 'title') { if (isParty()) { party.sel = 5; setState('lobby'); Snd.select(); } else if (isVS()) { vsSel = 5; setState('vssetup'); Snd.select(); } else startGame(); }
+  else if (state === 'vssetup') { if (stTimer > 0.25) vsSetDo(5, 1); }
   else if (state === 'lobby') { if (stTimer > 0.25) lobbyDo('start'); }
   else if (state === 'partyres' && stTimer > 1.4) nextParty();
   else if (state === 'clear' && stTimer > 0.8) { if (!artSaved) captureArt(); nextLevel(); }
-  else if (state === 'vsres' && stTimer > 1.4) { if (vsResult && vsResult.win) { if (!artSaved) captureArt(); nextLevel(); } else vsRetry(); }
+  else if (state === 'vsres' && stTimer > 1.4) {
+    if (vsResult && vsResult.win) { if (!artSaved) captureArt(); nextLevel(); }
+    else if (isStock()) { initLevel(level); setState('ready'); Bgm.play(bgmName()); Snd.ready(); }   // 残機制はもう一度(ゲームオーバーなし)
+    else vsRetry();
+  }
   else if (state === 'ending' && stTimer > 3) finishEnding();
   else if (state === 'over'  && stTimer > 0.8) { if (canContinue()) continueGame(); else backToTitle(); }
 }
@@ -6131,7 +6230,8 @@ function updateWorld(dt, stepped) {
   // BONUS AREA: 時間切れでクリア(それまでの占領率でボーナス)
   if (bonusT > 0) { bonusT -= dt; if (bonusT <= 0) { bonusT = 0.001; cancelTrail(); startClear(false); bonusT = 0; return; } }
   // ナワバリバトル: 時間切れで勝負
-  if (hasRivals()) { vsT -= dt; if (vsT <= 0) { vsT = 0; if (isParty()) partyEnd(); else vsEnd(); return; } }
+  if (pendingEnds.length) { const fs = pendingEnds; pendingEnds = []; for (const f of fs) f(); if (state !== 'play') return; }
+  if (hasRivals() && !isStock()) { vsT -= dt; if (vsT <= 0) { vsT = 0; if (isParty()) partyEnd(); else vsEnd(); return; } }
   updateParticles(dt);
   updateFloats(dt);
 }
@@ -7192,10 +7292,10 @@ function renderOverlay() {
     panel(60, 130, W - 120, 560);
     ctx.fillStyle = '#ffffff';
     ctx.font = "bold 28px 'Courier New', monospace";
-    ctx.fillText('OPTIONS', W / 2, 182);
+    ctx.fillText('OPTIONS', W / 2, 170);
 
     optRects = [];
-    const y0 = 194, dy = 26.2;
+    const y0 = 214, dy = 25.4;
     OPT_ITEMS.forEach((it, i) => {
       const y = y0 + i * dy;
       optRects.push({ x: 76, y: y - 22, w: W - 152, h: 30, idx: i });
@@ -7332,6 +7432,7 @@ function renderOverlay() {
   if (state === 'lobby') { drawLobby(t); return; }
   if (state === 'partyres') { drawPartyRes(t); return; }
   if (state === 'vsres') { drawVsRes(t); return; }
+  if (state === 'vssetup') { drawVsSetup(t); return; }
   if (state === 'matchopts') { drawMatchOpts(t); return; }
   if (state === 'keycfg') { drawKeyCfg(t); return; }
   if (state === 'vslose') {
@@ -7515,6 +7616,7 @@ function onKeyDown(e) {
   }
 
   if (state === 'lobby') { lobbyKey(k, e.repeat); e.preventDefault(); return; }
+  if (state === 'vssetup') { vsSetKey(k, e.repeat); e.preventDefault(); return; }
   if (state === 'keycfg') { keyCfgKey(e); e.preventDefault(); return; }
   if (state === 'matchopts') {
     const d = KEYDIR[k];
@@ -7805,6 +7907,7 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (state === 'lobby') { lobbyTap(p); return; }
+  if (state === 'vssetup') { vsSetTap(p); return; }
   if (state === 'matchopts') { const r = matchRects.find(q => inRect(p, q)); if (r) { matchSel = r.idx; matchAdjust(p.x < W / 2 ? -1 : 1); } else { setState(matchFrom); Snd.select(); } return; }
   if (state === 'keycfg') { const r = keyRects.find(q => inRect(p, q)); if (r) { keySel = [r.i, r.j]; keyWait = true; Snd.select(); } else { setState('matchopts'); Snd.select(); } return; }
   if (state === 'achv' || state === 'stats') { setState('options'); Snd.select(); return; }

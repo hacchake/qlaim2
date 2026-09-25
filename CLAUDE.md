@@ -37,6 +37,9 @@
 - 成績: `r.kills` / `r.downs`、自機は `vsStat`。rivalFail(r, why, by) の by に加算(by なしで VS の cut/trap は自機の手柄)
 - 描く音(voice): 低めの音域・4段まで・ローパス。死亡時と試合の外(tickMeta)で止める
 - CPU の強さは5段階 `CPU_LV` / `CPU_SKILL`(0.3〜1.6)。1 をこえると: 取りにいく大きさは「つよい」まで、ヌメリンから大きく離れる、いつも速く描く、迷わない(`thinkTime`)、自機の線をすぐ切りにくる
+- VS の準備画面 state 'vssetup'(`VSSET_ITEMS`、`vsSetDo`、タイトルで VS を決定すると出る)。O で 'matchopts' へ
+- 残機制 `isStock()`(settings.vsRule === 'STOCK'、`vsStock()` 機): CPU は `r.stock`、0 で `r.out`(dead=1e9 で戻らない)。全員脱落は `pendingEnds` で更新の最後に vsEnd。
+  自機は lives = 残機-1、applyDeath で lives<0 なら `vsEnd(true)`(負け、ゲームオーバーにしない)。残機制は時間で終わらず、負けたら同じラウンドをやり直し
 - 対戦の設定 state 'matchopts'(`MATCH_ITEMS`: settings.vsCpu / cpuLv / matchTime / stageSel)。ステージ RANDOM は startGame で `shuffleStages()`
 - キーコンフィグ state 'keycfg': `PARTY_KEYS` を書きかえ(`qlaim2.keys` に保存、`DEFAULT_KEYS` に戻す)。ひとり用でも P1 のキーが効く(`p1Dir`、inputVec)
 - 掛け合い: `BANTER` の組を `updateBanter` が7〜13秒ごと(返しは0.9秒後、`banterQ`)。`RIVAL_LINES` に respawn / over / lead / behind / idle も

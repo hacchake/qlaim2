@@ -12,6 +12,7 @@ let problems = [], frames = 0;
 function countOpen(){ let n=0; for (let i=0;i<surf.N;i++) if (grid[i]===OPEN) n++; return n; }
 for (const md of (globalThis.FUZZ_MODES || ['VS','VS','PARTY','PARTY','PLANE','CUBE','SPHERE','GSD','KLEIN','MOBIUS','KNOT','TORUS','TRUNC_ICOSA'])) {
   settings.mode = md;
+  settings.vsRule = md === 'VS' && Math.random() < 0.5 ? 'STOCK' : 'TIME';   // ナワバリバトルは時間制と残機制を両方ためす
   for (let game = 0; game < 2; game++) {
     startGame(); stTimer = 2; tickMeta(0.016);
     if (game === 1) { level = 1 + ((Math.random() * 12) | 0); initLevel(level); setState('play'); }   // 2回目は途中のエリアから(buddyや突進も試す)

@@ -1697,11 +1697,11 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('設定: ランダムは毎回の並びから', CONFIG.SURF[surf.key] && stageOrder.length === Object.keys(CONFIG.SURF).length);
   settings.vsCpu = 'AUTO'; settings.matchTime = 90; settings.stageSel = 'TOUR';
   backToTitle(); openMatchOpts('options');
-  err = null; try { render(); matchSel = 2; matchAdjust(1); render(); } catch (e) { err = e.stack; }
+  err = null; try { render(); matchSel = MATCH_ITEMS.findIndex(it => it.k === 'matchTime'); matchAdjust(1); render(); } catch (e) { err = e.stack; }
   assert('対戦の設定の画面', !err && state === 'matchopts' && settings.matchTime === 120, err);
   settings.matchTime = 90;
   // キーコンフィグ: P2 の「↑」を KeyT に
-  matchSel = 4; matchAdjust(1); assert('キーコンフィグの画面へ', state === 'keycfg');
+  matchSel = MATCH_ITEMS.findIndex(it => it.k === '_keys'); matchAdjust(1); assert('キーコンフィグの画面へ', state === 'keycfg');
   keySel = [1, 0]; keyCfgKey({ key: 'z' }); keyCfgKey({ key: 't', code: 'KeyT' });
   assert('キーを変えられる', PARTY_KEYS[1].u[0] === 'KeyT');
   err = null; try { render(); } catch (e) { err = e.stack; } assert('キーコンフィグの描画', !err, err);
@@ -1742,6 +1742,37 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('悪魔のCPUで試合が進む・バーの描画', !err, err);
   settings.cpuLv = 'AUTO';
   party.cpu = 4; assert('PARTYでも悪魔を選べる', CPU_LV[party.cpu] === '悪魔'); party.cpu = 1;
+}
+
+
+// ---- 102) ナワバリバトルの準備画面・残機制 ----
+{
+  settings.mode = 'VS'; settings.vsRule = 'TIME'; backToTitle();
+  onAction(); assert('VSを選んで決定すると準備画面', state === 'vssetup');
+  stTimer = 1;
+  vsSel = 0; vsSetKey('ArrowRight'); assert('準備画面: ステージを変える', settings.stageSel === 'RANDOM');
+  vsSetKey('ArrowLeft');
+  vsSel = 1; vsSetKey('ArrowRight'); assert('準備画面: ルールを残機制に', settings.vsRule === 'STOCK');
+  vsSel = 2; vsSetKey('ArrowRight'); assert('残機制なら残機の数を変える', settings.vsStock === 4);
+  vsSel = 3; vsSetKey('ArrowRight'); assert('CPUの数', settings.vsCpu === '1');
+  vsSel = 3; for (let i = 0; i < 3; i++) vsSetKey('ArrowRight');   // 1 → 4人
+  let err = null; try { render(); } catch (e) { err = e.stack; } assert('準備画面の描画', !err, err);
+  vsSel = 5; vsSetKey('z');
+  assert('スタートで残機制の試合(時間なし・CPU4人・みんな残機4)', state === 'ready' && isStock() && rivals.length === 4 && rivals.every(r => r.stock === 4) && lives === 3);
+  setState('play'); sparxes = [];
+  // CPUを全員脱落させると勝ち
+  for (const r of rivals) { for (let i = 0; i < 4; i++) { r.dead = 0; rivalFail(r, 'cut'); } }
+  assert('残機がなくなると脱落', rivals.every(r => r.out));
+  update(1 / 60);
+  assert('全員脱落させたら勝ち', state === 'vsres' && vsResult.win);
+  // 自機が脱落すると負け(ゲームオーバーにはならない)
+  startGame(); setState('play'); lives = 0; player.invuln = 0; death('テスト'); while (deathTimer > 0) update(1 / 60);
+  assert('残機制で自機が脱落すると、その試合の負け', state === 'vsres' && !vsResult.win);
+  stTimer = 2; onAction(); assert('負けても同じラウンドをもう一度(ゲームオーバーなし)', state === 'ready' && lives === vsStock() - 1);
+  err = null; try { setState('play'); render(); } catch (e) { err = e.stack; } assert('残機制の上のバー', !err, err);
+  // 時間制では時間が進む・残機制では進まない
+  const t0 = vsT; update(1 / 60); assert('残機制は時間で終わらない', vsT === t0);
+  settings.vsRule = 'TIME'; settings.vsStock = 3; settings.vsCpu = 'AUTO'; settings.stageSel = 'TOUR';
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
