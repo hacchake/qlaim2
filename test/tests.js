@@ -1640,5 +1640,41 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   party.size = 1; settings.mode = 'VS';
 }
 
+
+// ---- 99) 立体の対戦・画面分割 ----
+{
+  settings.mode = 'PARTY'; party.slots = [true, true, false]; party.size = 2;
+  startGame(); level = 2; initLevel(2); setState('play');
+  assert('ラウンド2は立体(立方体)', surf.is3D && surf.key === CONFIG.TOUR[1]);
+  assert('立体でも6人・全員が線の上から', rivals.length === 6 && rivals.every(r => isBoundary(r.c)));
+  const homes = [0, 1, 2].map(t => rivals.find(r => r.team === t).home);
+  assert('3チームの基地は離れている', cellDist(homes[0], homes[1]) > 8 && cellDist(homes[1], homes[2]) > 8 && cellDist(homes[0], homes[2]) > 8);
+  // 人間2人 → 2画面
+  assert('人間2人なら画面を2つに分ける', splitHumans().length === 2);
+  let err = null; try { for (let i = 0; i < 30; i++) { blinkT += 1 / 60; tickMeta(1 / 60); update(1 / 60); } render(); } catch (e) { err = e.stack; }
+  assert('分割画面の描画・カメラ', !err && paneCams[1] && paneCams[2], err);
+  // P2 が矢印で動いて線を引く(P2 の画面のカメラで向きを決める)
+  const p2 = rivals.find(r => r.human === 2), c0 = p2.c;
+  const pc = camOfHuman(p2);
+  const opens = [0, 1, 2, 3].map(k2 => surf.nb[p2.c * 4 + k2]).filter(n => n >= 0 && grid[n] === OPEN);
+  const tgt = opens[0], a = withCam(pc, () => surf.screenOf(p2.c)), b = withCam(pc, () => surf.screenOf(tgt));
+  const v = [b.x - a.x, b.y - a.y], lv = Math.hypot(v[0], v[1]);
+  codesDown.clear();
+  codesDown.add(v[1] < -Math.abs(v[0]) ? 'ArrowUp' : v[1] > Math.abs(v[0]) ? 'ArrowDown' : v[0] < 0 ? 'ArrowLeft' : 'ArrowRight');
+  for (let i = 0; i < 40 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); }
+  codesDown.clear();
+  assert('P2は自分の画面の向きで動いて線を引く', p2.c !== c0 && (p2.drawing || p2.dead > 0 || isBoundary(p2.c)));
+  // CPU だけの立体の試合が進む
+  party.slots = [false, false, false]; party.size = 1; startGame(); level = 2; initLevel(2); setState('play');
+  for (let i = 0; i < 60 * 25 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); }
+  assert('立体でもCPUが陣地を取る', rivalAreaSum() > 0);
+  // VS の立体
+  settings.mode = 'VS'; startGame(); level = 3; initLevel(3); setState('play');
+  assert('VSも立体(球)でCPUが出る', surf.is3D && rivals.length === 1 && isBoundary(rivals[0].c) && !earthMode());
+  err = null; try { for (let i = 0; i < 60 * 10 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); } catch (e) { err = e.stack; }
+  assert('VSの立体が例外なく進む', !err, err);
+  party.slots = [true, true, false]; party.size = 1;
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);

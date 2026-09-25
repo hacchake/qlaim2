@@ -24,6 +24,10 @@
 - 上塗り(アイテム 'over'、`hasRivals()` のときだけ。PARTY はこれだけ出る): `overT` の間は陣地の上も歩け(`canOverWalk`)、`overPaint` が半径2マスを塗る。
   相手 → 中立(`neutralNo` = 2色の混ざった色、`neutralAt` に時刻)、中立 → 自分(中立になって1.2秒たってから)。線(colA 0)と最初の壁は塗らない
 - チームの人数 `party.size`(1〜5、`PARTY_MAX`)。ファイターは赤黄青の順に交互で `perimeterSplit(n)` に並ぶ。`r.team` / `r.member`。味方の線には入れない。順位・バーは `teamArea(t)`。ownA は 255 = 中立(ファイター番号は 2〜)
+- 立体の対戦(`surfaceFor` は VS/PARTY も TOUR の順): 基地はヌメリンを出したあと `setupRivals3D` → `carveBases3D`(チーム0 = HOME、ほかは HOME・ヌメリンから一番遠いマスに半径 home×1.3 の基地。ふちは線)。
+  立体のファイターは `updateRival3D`(マスごと。人間は `neighborsToward`、CPU は `planRival3D`: 相手の線を切りに / まっすぐ入って曲がる道 / 線の上を歩く、帰りは `rivalGoHome3D`)。
+  RTRAIL の持ち主は `rtOwn`。PARTY の途中決着は `matchTarget()` = 90%。対戦モードの球は地図にしない
+- 画面分割(立体の PARTY で人間2〜3人): `splitHumans()`、`paneRects(n)`(上下に等分)、人間ごとのカメラ `paneCams`、`withCam(pc, fn)` で一時的に切り替えて描画・追従・操作の向き
 - 魂: `rivalFail` で `r.soul`(やられた位置)、`soulPos(r)` が昇る(前半45%)→ 画面の上から戻る場所へ(後半)。自機のミスは `souls` に昇る魂だけ
 - 生き返り: やられている間は戻る場所にたまる輪、戻った直後は半透明にせずチームの色の輪が広がる(点滅なし)
 - 描く音のハーモニー: ファイターごとに `Snd.voiceStart(id, team)`。チーム0/1/2 が和音の根音/3度/5度から始まり、線が伸びるほど和音の中を上がる(`voiceHz`)。

@@ -2062,6 +2062,7 @@ function updateCamera(dt) {
   const wantD = (state === 'play' || state === 'ready') && held.slow ? 5.3 : state === 'play' && focusDrawing ? 3.95
               : state === 'clear' ? 4.7 : 3.4;   // クリア中は引いて陣地全体を見せる
   cam.D += (wantD - cam.D) * (1 - Math.exp(-dt * (state === 'ready' ? 3.5 : 2.5)));
+  if ((state === 'play' || state === 'ready') && splitHumans().length) updatePaneCams(dt);
   if (state === 'play' || state === 'ready') camFollow(camFocusCell(), dt);
   else if (state !== 'pause') camRotate([0.25, 1, 0], dt * 0.35); // タイトル等ではゆっくり回る
 }
@@ -4346,7 +4347,8 @@ function updateRival3D(r, dt) {
       r.acc -= 1;
       let ok = false;
       // 同じ向きなら、継ぎ目でもまっすぐ進み続ける
-      const cand = neighborsToward(r.c, inp.v);
+      const pc = camOfHuman(r);
+      const cand = pc ? withCam(pc, () => neighborsToward(r.c, inp.v)) : neighborsToward(r.c, inp.v);
       if (r.prev3 >= 0 && r.lastV && r.lastV[0] * inp.v[0] + r.lastV[1] * inp.v[1] > 0.9) { const st = straightNext(r.c, r.prev3); if (st >= 0 && cand.includes(st)) cand.unshift(st); }
       for (const n of cand) { const c0 = r.c; if (rivalStep(r, n)) { r.prev3 = c0; ok = true; break; } }
       r.lastV = inp.v;
@@ -4402,6 +4404,79 @@ function drawRivals3D(t) {
     if (r.sayT > 0) drawBubble(p.x, p.y - 12, r.sayTxt, Math.min(1, r.sayT * 3), INK_COLORS[r.col]);
   }
 }
+/* ---- 画面分割(立体の PARTY で人間が2〜3人のとき) ----
+   人間ごとにカメラを持ち、ゲーム画面を上下に分けて、それぞれの人のまわりを映す。
+   withCam でその人のカメラに一時的に切り替えて、描画・カメラ追従・操作の向きの計算をする */
+let paneCams = {};                                   // 人間の番号 → { R, D, F, cx, cy }
+function splitHumans() {
+  if (!isParty() || !surf.is3D || !rivals.length) return [];
+  const hs = rivals.filter(r => r.human).sort((a, b) => a.human - b.human);
+  return hs.length >= 2 ? hs : [];
+}
+function paneRects(n) {
+  const ph = (H - FIELD_Y) / n;
+  return Array.from({ length: n }, (_, i) => ({ x: 0, y: FIELD_Y + i * ph, w: W, h: ph }));
+}
+function paneCam(r, rect) {
+  let pc = paneCams[r.human];
+  const k = Math.min(rect.w / W, rect.h / (H - FIELD_Y)) * 1.7;       // 小さい画面でも見やすいよう大きめに(はみ出すぶんは切る)
+  if (!pc) {
+    pc = paneCams[r.human] = { R: cam.R.slice(), D: 3.4, F: 0, cx: 0, cy: 0 };
+    withCam(pc, () => { const c = r.dead > 0 ? r.home : r.c; camSnap([surf.dir[c * 3], surf.dir[c * 3 + 1], surf.dir[c * 3 + 2]]); });
+  }
+  pc.cx = rect.x + rect.w / 2; pc.cy = rect.y + rect.h / 2;
+  pc.F = 285 * Math.sqrt(pc.D * pc.D - 1) * k;
+  return pc;
+}
+function withCam(pc, fn) {
+  const save = { R: cam.R, D: cam.D, F: cam.F, cx: cam.cx, cy: cam.cy };
+  cam.R = pc.R; cam.D = pc.D; cam.F = pc.F; cam.cx = pc.cx; cam.cy = pc.cy;
+  try { return fn(); }
+  finally { pc.R = cam.R; pc.D = cam.D; Object.assign(cam, save); }
+}
+// 人間 r の画面のカメラ(分割していなければ null)
+function camOfHuman(r) {
+  const hs = splitHumans(); if (!hs.length) return null;
+  const i = hs.indexOf(r); if (i < 0) return null;
+  return paneCam(r, paneRects(hs.length)[i]);
+}
+function updatePaneCams(dt) {
+  const hs = splitHumans();
+  hs.forEach((r, i) => {
+    const pc = paneCam(r, paneRects(hs.length)[i]);
+    withCam(pc, () => {
+      const want = r.drawing ? 3.95 : 3.4;
+      cam.D += (want - cam.D) * (1 - Math.exp(-dt * 2.5));
+      camFollow(r.dead > 0 ? r.home : r.c, dt);
+    });
+  });
+}
+// 分割画面の描画: それぞれの人のカメラで、盤面・アイテム・ファイター・魂を描く
+function renderSplit(t, hs) {
+  const rects = paneRects(hs.length);
+  hs.forEach((r, i) => {
+    const rc = rects[i], pc = paneCam(r, rc);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(rc.x, rc.y, rc.w, rc.h); ctx.clip();
+    withCam(pc, () => {
+      soulTop = rc.y - 40;
+      render3D(t);
+      drawItems();
+      drawRivals3D(t);
+      drawSouls(true);
+      soulTop = null;
+    });
+    ctx.restore();
+    // 境目と、だれの画面か
+    ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3;
+    ctx.strokeRect(rc.x + 1.5, rc.y + 1.5, rc.w - 3, rc.h - 3);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(rc.x + 8, rc.y + rc.h - 30, 64, 22);
+    ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 15px 'Courier New', monospace"; ctx.textAlign = 'left';
+    ctx.fillText(r.name + (r.dead > 0 ? ' …' : ''), rc.x + 14, rc.y + rc.h - 13);
+  });
+}
+let soulTop = null;
+
 // カメラが追いかけるマス: PARTY は P1(いなければ最初のファイター)、それ以外は自機
 function camFocusCell() {
   if (isParty() && rivals.length) { const r = rivals.find(q => q.human === 1) || rivals[0]; return r.dead > 0 ? r.home : r.c; }
@@ -4415,7 +4490,7 @@ let souls = [];                                      // 自機など: { x, y, co
 function soulPos(r) {
   const k = 1 - r.dead / CONFIG.RIVAL_RESPAWN;      // 0 → 1
   const home = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS };
-  const s0 = r.soul || home, top = FIELD_Y - 60;
+  const s0 = r.soul || home, top = soulTop != null ? soulTop : FIELD_Y - 60;
   if (k < 0.45) {                                    // 昇る
     const u = k / 0.45, e = u * u;
     return { x: s0.x + Math.sin(u * 9) * 10 * (1 - u * 0.5), y: s0.y + (top - s0.y) * e, a: 1 - u * 0.4, up: true };
@@ -4442,13 +4517,14 @@ function drawSoul(x, y, col, a, up) {
   ctx.fillRect(x - 3.5, y - 2, 2, 3); ctx.fillRect(x + 1.5, y - 2, 2, 3);
   ctx.globalAlpha = 1;
 }
-function drawSouls(dt) {
+function drawSouls(inPane) {
   for (const r of rivals) {
     if (r.dead <= 0) continue;
     const q = soulPos(r);
     drawSoul(q.x, q.y, INK_COLORS[r.col], q.a, q.up);
-    if (Math.random() < 0.35) particles.push({ x: q.x + rand(-4, 4), y: q.y + rand(-4, 4), vx: rand(-8, 8), vy: q.up ? rand(10, 30) : rand(-30, -10), t: rand(0.3, 0.6), col: INK_COLORS[r.col], r: rand(1, 2) });
+    if (!inPane && Math.random() < 0.35) particles.push({ x: q.x + rand(-4, 4), y: q.y + rand(-4, 4), vx: rand(-8, 8), vy: q.up ? rand(10, 30) : rand(-30, -10), t: rand(0.3, 0.6), col: INK_COLORS[r.col], r: rand(1, 2) });
   }
+  if (inPane) return;
   for (const so of souls) {
     so.t += 1 / 60;
     drawSoul(so.x + Math.sin(so.t * 9) * 8, so.y - so.t * so.t * 260, so.col, Math.max(0, 1 - so.t / 1.6), true);
@@ -4726,6 +4802,7 @@ function setupRivals(lv) {
 }
 // 立体: 基地を作って、そのふちから出発(ヌメリンから遠いところに基地を作るので、ヌメリンを出したあとに呼ぶ)
 function setupRivals3D(lv) {
+  paneCams = {};
   if (!hasRivals()) return;
   {
     const vs = isVS(), n = vs ? (lv >= 4 ? 2 : 1) : 3 * party.size;
@@ -6150,17 +6227,17 @@ function render() {
 
   ctx.fillStyle = t.field;
   ctx.fillRect(-8, -8, W + 16, H + 16);
-  if (surf.is3D) { drawAtmosphere(); render3D(t); }
+  const splitHs = state !== 'title' ? splitHumans() : [];
+  if (splitHs.length) renderSplit(t, splitHs);
+  else if (surf.is3D) { drawAtmosphere(); render3D(t); }
   else render2D(t);
-  drawItems();
-  drawSeekers();
-  drawBuddies();
+  if (!splitHs.length) { drawItems(); drawSeekers(); drawBuddies(); }
   if (rivals.length && !surf.is3D) drawRivals(t);
-  if (rivals.length && surf.is3D) drawRivals3D(t);
-  if (rivals.length || souls.length) drawSouls();
+  if (rivals.length && surf.is3D && !splitHs.length) drawRivals3D(t);
+  if ((rivals.length || souls.length) && !splitHs.length) drawSouls(false);
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
   if (isParty() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause' || state === 'partyres')) drawPartyHud();
-  if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state)) drawBackView(t);
+  if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state) && !splitHs.length) drawBackView(t);
   if (state === 'play' || state === 'ready' || state === 'pause') drawStatus();
   if (tutorStep >= 0 && !hasRivals() && (state === 'play' || state === 'ready')) drawTutor(t);   // 対戦モードは上のバーと重なるので出さない
 
