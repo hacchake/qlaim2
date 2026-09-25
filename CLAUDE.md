@@ -34,6 +34,7 @@
 - 結果: VS は state 'vsres'(`vsResult`、`drawResultTable`)。勝ちは startClear の得点・記録をしてから vsres に。PARTY は 'partyres' に同じ表と MVP。どちらも最初の1秒は「しゅうりょう!」
 - 成績: `r.kills` / `r.downs`、自機は `vsStat`。rivalFail(r, why, by) の by に加算(by なしで VS の cut/trap は自機の手柄)
 - 描く音(voice): 低めの音域・4段まで・ローパス。死亡時と試合の外(tickMeta)で止める
+- CPU の強さは5段階 `CPU_LV` / `CPU_SKILL`(0.3〜1.6)。1 をこえると: 取りにいく大きさは「つよい」まで、ヌメリンから大きく離れる、いつも速く描く、迷わない(`thinkTime`)、自機の線をすぐ切りにくる
 - 対戦の設定 state 'matchopts'(`MATCH_ITEMS`: settings.vsCpu / cpuLv / matchTime / stageSel)。ステージ RANDOM は startGame で `shuffleStages()`
 - キーコンフィグ state 'keycfg': `PARTY_KEYS` を書きかえ(`qlaim2.keys` に保存、`DEFAULT_KEYS` に戻す)。ひとり用でも P1 のキーが効く(`p1Dir`、inputVec)
 - 掛け合い: `BANTER` の組を `updateBanter` が7〜13秒ごと(返しは0.9秒後、`banterQ`)。`RIVAL_LINES` に respawn / over / lead / behind / idle も

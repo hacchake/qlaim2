@@ -4386,19 +4386,20 @@ function planRival3D(r) {
   const opens = [0, 1, 2, 3].map(k => surf.nb[r.c * 4 + k]).filter(n => n >= 0 && grid[n] === OPEN);
   let best = null, bs = 0;
   for (let tr = 0; tr < 6 && opens.length; tr++) {
-    const D = 3 + ((Math.random() * (5 + sk * 7)) | 0), L = 4 + ((Math.random() * (6 + sk * 10)) | 0), side = Math.random() < 0.5 ? 1 : -1;
+    const skR = Math.min(sk, 1);
+    const D = 3 + ((Math.random() * (5 + skR * 7)) | 0), L = 4 + ((Math.random() * (6 + skR * 10)) | 0), side = Math.random() < 0.5 ? 1 : -1;
     const path = [pick(opens)];
     let prev = r.c, cur = path[0], ok = true;
     for (let i = 1; i < D + L && ok; i++) {
       const nx = i === D ? turnNext(cur, prev, side) : straightNext(cur, prev);
       if (nx < 0 || grid[nx] !== OPEN) break;
-      if (qixNear3(nx, surf.def.arm + 4)) { ok = false; break; }
+      if (qixNear3(nx, surf.def.arm + 4 + Math.max(0, sk - 1) * 5)) { ok = false; break; }
       path.push(nx); prev = cur; cur = nx;
     }
     if (!ok || path.length < 3) continue;
     if (path.length > bs) { bs = path.length; best = path; }
   }
-  if (best) { r.plan = best; r.mode = 'raid'; r.fast = Math.random() < sk * 0.4; return; }
+  if (best) { r.plan = best; r.mode = 'raid'; r.fast = sk > 1 || Math.random() < sk * 0.4; return; }
   // よい場所がない: 線の上を歩いて、ヌメリンから離れた空き地の前へ
   r.plan = bfsPath(r.c, n => grid[n] === WALL && isBoundary(n), n => grid[n] === WALL && isBoundary(n) && !qixNear3(n, surf.def.arm + 8)
     && [0, 1, 2, 3].some(k => { const m = surf.nb[n * 4 + k]; return m >= 0 && grid[m] === OPEN; }) && Math.random() < 0.15, 60);
@@ -4432,7 +4433,7 @@ function updateRival3D(r, dt) {
   if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14)) rivalGoHome3D(r);
   if (!r.plan.length) {
     if (r.drawing) { rivalGoHome3D(r); if (!r.plan.length) { rivalFail(r, 'stuck'); return; } }
-    else { r.think -= dt; if (r.think > 0) return; r.think = rand(0.1, 0.4) * (1.3 - rivalSkill()); planRival3D(r); if (!r.plan.length) return; }
+    else { r.think -= dt; if (r.think > 0) return; r.think = thinkTime(); planRival3D(r); if (!r.plan.length) return; }
   }
   r.acc = (r.acc || 0) + dt * spdOf(r.fast) * (0.8 + rivalSkill() * 0.25);
   while (r.acc >= 1 && r.plan.length) {
@@ -4604,6 +4605,9 @@ function drawSouls(inPane) {
 
 /* ---------------- 対戦の設定・キーコンフィグ ----------------
    OPTIONS の「対戦の設定」: VS の CPU の数・CPU の強さ・試合時間・ステージ(TOUR の順 / ランダム / どれか1つ)・キーコンフィグ */
+// CPUの強さ。超つよい = 自機より少し速い・すぐ切りにくる / 悪魔 = これ以上ない強さ(もっと速く、迷わず、ヌメリンも上手によける)
+const CPU_LV = ['よわい', 'ふつう', 'つよい', '超つよい', '悪魔'];
+const CPU_SKILL = [0.3, 0.55, 0.85, 1.15, 1.6];
 const MATCH_TIMES = [60, 90, 120, 180];
 const STAGE_OPTS = ['TOUR', 'RANDOM'].concat(Object.keys(CONFIG.SURF));
 function matchTime() { return MATCH_TIMES.includes(+settings.matchTime) ? +settings.matchTime : 90; }
@@ -4612,7 +4616,7 @@ function shuffleStages() { stageOrder = Object.keys(CONFIG.SURF).sort(() => Math
 function stageLabel(st) { return st === 'TOUR' ? 'TOURの順' : st === 'RANDOM' ? 'ランダム' : CONFIG.SURF[st] ? CONFIG.SURF[st].label : st; }
 const MATCH_ITEMS = [
   { k:'vsCpu',     label:'VSのCPUの数',  vals:['AUTO', '1', '2', '3', '4', '5', '6', '7'] },
-  { k:'cpuLv',     label:'VSのCPUの強さ', vals:['AUTO', 'よわい', 'ふつう', 'つよい'] },
+  { k:'cpuLv',     label:'VSのCPUの強さ', vals:['AUTO'].concat(CPU_LV) },
   { k:'matchTime', label:'試合時間',      vals:MATCH_TIMES },
   { k:'stageSel',  label:'ステージ',      vals:STAGE_OPTS },
   { k:'_keys',     label:'キーコンフィグ' },
@@ -4776,10 +4780,9 @@ const DEFAULT_KEYS = JSON.parse(JSON.stringify(PARTY_KEYS));
 // size: 1チームの人数(1〜5)。2人目からはCPU。3チーム×5人=15人まで(重さを測って決めた上限)
 const PARTY_MAX = 5;
 const party = { slots: [true, true, false], cpu: 1, sel: 5, size: 1 };
-{ const sv = store.get('qlaim.party', {}); if (Array.isArray(sv.slots) && sv.slots.length === 3) party.slots = sv.slots.map(Boolean); if (sv.cpu != null) party.cpu = clamp(sv.cpu | 0, 0, 2); if (sv.size != null) party.size = clamp(sv.size | 0, 1, PARTY_MAX); }
+{ const sv = store.get('qlaim.party', {}); if (Array.isArray(sv.slots) && sv.slots.length === 3) party.slots = sv.slots.map(Boolean); if (sv.cpu != null) party.cpu = clamp(sv.cpu | 0, 0, CPU_LV.length - 1); if (sv.size != null) party.size = clamp(sv.size | 0, 1, PARTY_MAX); }
 function humanCount() { return party.slots.filter(Boolean).length; }
 function saveParty() { store.set('qlaim.party', { slots: party.slots, cpu: party.cpu, size: party.size }); }
-const CPU_LV = ['よわい', 'ふつう', 'つよい'];
 const codesDown = new Set();                         // いま押されているキー(e.code)
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', e => { if (e.code) codesDown.add(e.code); });
@@ -4869,7 +4872,7 @@ function drawLobby(t) {
 function lobbyDo(act, i, dir) {
   if (act === 'slot') { party.slots[i] = !party.slots[i]; Snd.blip(); }
   else if (act === 'size') { party.size = ((party.size - 1 + (dir || 1) + PARTY_MAX) % PARTY_MAX) + 1; Snd.blip(); }
-  else if (act === 'cpu') { party.cpu = (party.cpu + (dir || 1) + 3) % 3; Snd.blip(); }
+  else if (act === 'cpu') { party.cpu = (party.cpu + (dir || 1) + CPU_LV.length) % CPU_LV.length; Snd.blip(); }
   else if (act === 'start') { saveParty(); startGame(); return; }
   saveParty();
 }
@@ -5074,12 +5077,14 @@ function playerArea() { return ownCount[1] + ownCount[0]; }
 function neutralArea() { return ownCount[OWN_NEUTRAL]; }
 function rivalTrailCells() { return rivals.reduce((a, r) => a + r.trail.length, 0); }
 // CPU の強さ: エリアが進むほど速く、ずる賢く
+// CPU の強さ(0.3 〜 1.6)。1 をこえると「超つよい」「悪魔」
 function rivalSkill() {
-  if (isParty()) return Math.min(1, [0.3, 0.55, 0.85][party.cpu] + (level - 1) * 0.04);
-  const lvI = ['よわい', 'ふつう', 'つよい'].indexOf(settings.cpuLv);
-  if (lvI >= 0) return Math.min(1, [0.3, 0.55, 0.85][lvI] + (level - 1) * 0.03);
+  if (isParty()) return Math.min(1.6, CPU_SKILL[party.cpu] + (level - 1) * 0.04);
+  const lvI = CPU_LV.indexOf(settings.cpuLv);
+  if (lvI >= 0) return Math.min(1.6, CPU_SKILL[lvI] + (level - 1) * 0.03);
   return Math.min(1, 0.3 + (level - 1) * 0.08);
 }
+function thinkTime() { return rand(0.1, 0.4) * Math.max(0.08, 1.3 - rivalSkill()); }   // 強いほど迷わない
 
 function rivalStep(r, n) {
   if (n < 0) return false;
@@ -5223,13 +5228,14 @@ function planRival(r) {
   let ix = 0, iy = 0;
   for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && grid[n] === OPEN) { ix += (n % GW) - (c % GW); iy += ((n / GW) | 0) - ((c / GW) | 0); } }
   if (ix || iy) {
-    const q = qixes[0], safe = 9 + surf.def.arm;
+    const q = qixes[0], safe = 9 + surf.def.arm + Math.max(0, sk - 1) * 10;   // 強いほどヌメリンから大きく離れる
+    const skR = Math.min(sk, 1);                        // 取りにいく大きさは「つよい」まで(大きすぎると危ない)
     const qd = pt => q ? Math.hypot(pt[0] - q.x, pt[1] - q.y) : 99;
     const isOpen = pt => { const x = Math.floor(pt[0]), y = Math.floor(pt[1]); return x > 0 && y > 0 && x < GW - 1 && y < GH - 1 && grid[idx(x, y)] === OPEN; };
     let best = null, bs = 0;
     for (let tr = 0; tr < 8; tr++) {
       const a = Math.atan2(iy, ix) + rand(-0.5, 0.5);
-      const D = rand(10, 18 + sk * 22), L = rand(14, 26 + sk * 34), side = Math.random() < 0.5 ? 1 : -1;
+      const D = rand(10, 18 + skR * 22), L = rand(14, 26 + skR * 34), side = Math.random() < 0.5 ? 1 : -1;
       const p1 = [px + Math.cos(a) * D, py + Math.sin(a) * D];
       const sa = a + side * Math.PI / 2 + rand(-0.35, 0.35);
       const p2 = [p1[0] + Math.cos(sa) * L, p1[1] + Math.sin(sa) * L];
@@ -5240,7 +5246,7 @@ function planRival(r) {
       const sc = D * L;
       if (sc > bs) { bs = sc; best = [p1, p2, p3]; }
     }
-    if (best) { r.plan = best; r.fast = Math.random() < sk * 0.4; r.mode = 'raid'; return; }
+    if (best) { r.plan = best; r.fast = sk > 1 || Math.random() < sk * 0.4; r.mode = 'raid'; return; }
   }
   // よい場所がない: 線の上を歩いて、ヌメリンから離れた空き地の前へ
   const path = frontierPath(r.c);
@@ -5339,10 +5345,11 @@ function updateRivals(dt) {
     // 危ない(ヌメリンが近い)ときは、いちばん近い線へ逃げる
     const q = qixes[0];
     if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
-    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < 7 + surf.def.arm * 0.7) || r.drawT > 14)) rivalGoHome(r);
+    const fleeR = 7 + surf.def.arm * 0.7 + Math.max(0, rivalSkill() - 1) * 6;   // 強いほど早めに逃げる
+    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < fleeR) || r.drawT > 14)) rivalGoHome(r);
     if (!r.plan.length) {
       if (r.drawing) { rivalGoHome(r); if (!r.plan.length) { rivalFail(r, 'stuck'); continue; } }
-      else { r.think -= dt; if (r.think > 0) continue; r.think = rand(0.1, 0.4) * (1.3 - rivalSkill()); planRival(r); if (!r.plan.length) continue; }
+      else { r.think -= dt; if (r.think > 0) continue; r.think = thinkTime(); planRival(r); if (!r.plan.length) continue; }
     }
     const tg = r.plan[0], dx = tg[0] - r.fx, dy = tg[1] - r.fy, dd = Math.hypot(dx, dy);
     if (dd < 0.45) { r.plan.shift(); r.best = 1e9; r.noProg = 0; continue; }
@@ -5523,15 +5530,22 @@ function drawVsHud() {
   for (const e of rk) { const a = e.area / initOpen * w; ctx.fillStyle = e.col; ctx.fillRect(cx, y, a, h); if (e.me) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(cx, y, a, h); } cx += a; }
   ctx.fillStyle = '#8a8fa8'; ctx.fillRect(cx, y, w * neutralArea() / initOpen, h);
   const myRank = rk.findIndex(e => e.me) + 1;
-  ctx.font = "bold 12px 'Courier New', monospace";
-  ctx.textAlign = 'left'; ctx.fillStyle = myRank === 1 ? '#7bffa0' : '#ffffff';
-  ctx.fillText('YOU ' + (playerArea() / initOpen * 100).toFixed(1) + '%  ' + myRank + '位/' + rk.length + '人', x, y + h + 14);
-  ctx.textAlign = 'right'; ctx.fillStyle = rk[0].col;
-  ctx.fillText('1位 ' + rk[0].name + ' ' + (rk[0].area / initOpen * 100).toFixed(1) + '%', x + w, y + h + 14);
+  // バーの下: 色ごとの割合(自分・CPU の並び順のまま。自分は白い枠)
+  const all = [{ me: true, name: 'YOU', area: playerArea(), col: teamHex(0) }].concat(rivals.map(r => ({ name: r.name, area: r.area, col: teamHex(r.team) })));
+  const cw = (w + 60) / all.length;
+  ctx.font = "bold " + (all.length > 6 ? 10 : 11) + "px 'Courier New', monospace"; ctx.textAlign = 'center';
+  all.forEach((e, i) => {
+    const cx2 = x - 30 + cw * (i + 0.5), ty = y + h + 14;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(cx2 - cw / 2 + 2, ty - 11, cw - 4, 15);
+    if (e.me) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.strokeRect(cx2 - cw / 2 + 2.5, ty - 10.5, cw - 5, 14); }
+    ctx.fillStyle = e.col; ctx.fillText((e.me ? 'YOU ' : '') + (e.area / initOpen * 100).toFixed(1) + '%', cx2, ty);
+  });
+  ctx.textAlign = 'left'; ctx.fillStyle = myRank === 1 ? '#7bffa0' : '#ffffff'; ctx.font = "bold 12px 'Courier New', monospace";
+  ctx.fillText(myRank + '位/' + rk.length + '人', x - 110, y + 12);
   ctx.textAlign = 'center';
   const tm = Math.ceil(vsT);
   ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
-  ctx.fillText(Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y + h + 15);
+  ctx.fillText(Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y - 8);   // 残り時間はバーの上(下は色ごとの割合)
 }
 
 /* ---------------- SPARX ---------------- */

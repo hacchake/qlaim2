@@ -1730,5 +1730,19 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   err = null; try { setState('title'); tickMeta(0.016); } catch (e) { err = e.stack; } assert('試合の外では描く音を止める', !err && Snd.voiceCount === 0, err);
 }
 
+
+// ---- 101) CPUの強さ5段階・上のバーの色ごとの割合 ----
+{
+  settings.mode = 'VS';
+  const sk = CPU_LV.map(l => { settings.cpuLv = l; level = 1; return rivalSkill(); });
+  assert('強さは5段階(悪魔がいちばん)', CPU_LV.length === 5 && CPU_LV[4] === '悪魔' && sk.every((v, i) => i === 0 || v > sk[i - 1]) && sk[4] > 1.4);
+  assert('悪魔は迷わない(考える時間がとても短い)', (() => { settings.cpuLv = '悪魔'; let m = 0; for (let i = 0; i < 50; i++) m = Math.max(m, thinkTime()); return m < 0.05; })());
+  settings.cpuLv = '悪魔'; startGame(); setState('play');
+  let err = null; try { for (let i = 0; i < 60 * 15 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); } catch (e) { err = e.stack; }
+  assert('悪魔のCPUで試合が進む・バーの描画', !err, err);
+  settings.cpuLv = 'AUTO';
+  party.cpu = 4; assert('PARTYでも悪魔を選べる', CPU_LV[party.cpu] === '悪魔'); party.cpu = 1;
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);
