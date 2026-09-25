@@ -1497,13 +1497,13 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   // 勝ち負け
   const fakeArea = (me, cpu, cpu2) => { cpu2 = cpu2 || 0; let a = 0, b2 = 0, b3 = 0; for (let i = 0; i < surf.N; i++) { if (grid[i] !== OPEN) continue; if (a < me) { grid[i] = WALL; ownA[i] = 1; a++; } else if (b2 < cpu) { grid[i] = WALL; ownA[i] = 2; b2++; } else if (b3 < cpu2) { grid[i] = WALL; ownA[i] = 3; b3++; } } claimed = me + cpu + cpu2; recountAreas(); };
   startGame(); setState('play'); fakeArea(40, 10);
-  vsEnd(); assert('いちばん広ければ勝ち(自機40 > CPU10)', state === 'clear' && vsWin);
+  vsEnd(); assert('いちばん広ければ勝ち(自機40 > CPU10)', state === 'vsres' && vsWin);
   startGame(); setState('play'); fakeArea(40, 30, 30);
-  vsEnd(); assert('CPUの合計より小さくても、1位なら勝ち(40 > 30, 30)', state === 'clear' && vsWin);
+  vsEnd(); assert('CPUの合計より小さくても、1位なら勝ち(40 > 30, 30)', state === 'vsres' && vsWin);
   startGame(); setState('play'); fakeArea(10, 60); const lv0 = lives;
-  vsEnd(); assert('せまいと負け', state === 'vslose' && !vsWin);
+  vsEnd(); assert('せまいと負け', state === 'vsres' && !vsWin);
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('負け画面の描画', !err, err);
-  stTimer = 1; onAction(); assert('負けたら残機を1つ使ってやり直し', lives === lv0 - 1 && state === 'ready');
+  stTimer = 2; onAction(); assert('負けたら残機を1つ使ってやり直し', lives === lv0 - 1 && state === 'ready');
   err = null; try { setState('play'); render(); } catch (e) { err = e.stack; } assert('VSの描画(CPU・バー)', !err, err);
   assert('VSの自機は赤チーム(赤系で揺らぐ)', inkHex() === TEAM_SHADES[0][0] && TEAM_SHADES[0].includes(palHex(inkNo(1))));
   assert('VSのCPUは2ラウンドごとに増えて7人まで', vsCpuCount(1) === 3 && vsCpuCount(3) === 4 && vsCpuCount(20) === 7);
@@ -1560,7 +1560,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   partyEnd();
   assert('時間切れで順位(黄=P2が1位)', state === 'partyres' && partyRank[0].team === 1 && partyRank[2].team === 2);
   err = null; try { render(); } catch (e) { err = e.stack; } assert('結果画面の描画', !err, err);
-  stTimer = 1; onKeyDown({ key: 'z', preventDefault() {} });
+  stTimer = 2; onKeyDown({ key: 'z', preventDefault() {} });
   assert('Zで次のラウンド', state === 'ready' && level === 2 && rivals.length === 3);
   assert('PARTYでは記録を残さない・buddyなし', buddies.length === 0);
   settings.mode = 'VS';
@@ -1678,6 +1678,56 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   err = null; try { for (let i = 0; i < 60 * 10 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); } catch (e) { err = e.stack; }
   assert('VSの立体が例外なく進む', !err, err);
   party.slots = [true, true, false]; party.size = 1;
+}
+
+
+// ---- 100) 結果画面・音・対戦の設定・キーコンフィグ・掛け合い・柄 ----
+{
+  // 結果画面
+  settings.mode = 'VS'; settings.vsCpu = 'AUTO'; startGame(); setState('play');
+  vsStat.kills = 2; rivals[0].kills = 1; rivals[0].downs = 3;
+  vsEnd();
+  let err = null; try { stTimer = 0.3; render(); stTimer = 2; render(); } catch (e) { err = e.stack; }
+  assert('VSの結果画面(しゅうりょう → 表)', !err && state === 'vsres' && vsResult.rank.some(e => e.me && e.kills === 2), err);
+  // 設定: CPUの数・時間・ステージ
+  settings.vsCpu = '6'; settings.matchTime = 120; settings.stageSel = 'TORUS';
+  startGame(); setState('play');
+  assert('設定: CPU6人・120秒・ドーナツ', rivals.length === 6 && vsT === 120 && surf.key === 'TORUS');
+  settings.stageSel = 'RANDOM'; startGame();
+  assert('設定: ランダムは毎回の並びから', CONFIG.SURF[surf.key] && stageOrder.length === Object.keys(CONFIG.SURF).length);
+  settings.vsCpu = 'AUTO'; settings.matchTime = 90; settings.stageSel = 'TOUR';
+  backToTitle(); openMatchOpts('options');
+  err = null; try { render(); matchSel = 2; matchAdjust(1); render(); } catch (e) { err = e.stack; }
+  assert('対戦の設定の画面', !err && state === 'matchopts' && settings.matchTime === 120, err);
+  settings.matchTime = 90;
+  // キーコンフィグ: P2 の「↑」を KeyT に
+  matchSel = 4; matchAdjust(1); assert('キーコンフィグの画面へ', state === 'keycfg');
+  keySel = [1, 0]; keyCfgKey({ key: 'z' }); keyCfgKey({ key: 't', code: 'KeyT' });
+  assert('キーを変えられる', PARTY_KEYS[1].u[0] === 'KeyT');
+  err = null; try { render(); } catch (e) { err = e.stack; } assert('キーコンフィグの描画', !err, err);
+  keyCfgKey({ key: 'r' }); assert('R で元に戻す', PARTY_KEYS[1].u[0] === 'ArrowUp');
+  // ひとりで遊ぶとき P1 のキーでも動ける
+  PARTY_KEYS[0].u = ['KeyT']; settings.mode = 'PLANE'; startGame(); setState('play');
+  codesDown.add('KeyT'); const v = inputVec(); codesDown.clear();
+  assert('ひとりでもP1のキーで動ける', v && v[1] < 0);
+  PARTY_KEYS[0].u = DEFAULT_KEYS[0].u.slice();
+  // 掛け合い
+  settings.mode = 'VS'; startGame(); setState('play');
+  banterT = 0; updateBanter(0.01);
+  const said = rivals.some(r => r.sayT > 0) || speech.t > 0;
+  updateBanter(1.0);
+  assert('掛け合い: ひとりが言って、だれかが返す', said && banterQ.length === 0);
+  // コンボの柄
+  const cells = []; for (let y = 40; y < 70; y++) for (let x = 20; x < 60; x++) { const c = idx(x, y); grid[c] = WALL; colA[c] = teamNo(2); cells.push(c); }
+  for (const pt of ['ichimatsu', 'asanoha', 'flower']) {
+    applyTeamPattern(cells, pt, cells[0]);
+    const on = cells.filter(c => mixA[c] > 0).length;
+    assert('柄: ' + pt + ' がつく(一部だけ白っぽく)', on > 20 && on < cells.length * 0.8, on + '/' + cells.length);
+  }
+  assert('コンボ1=市松 2=麻の葉 3=フラワーオブライフ', teamPat(1) === 'ichimatsu' && teamPat(2) === 'asanoha' && teamPat(5) === 'flower' && teamPat(0) === null);
+  err = null; try { redrawField(); } catch (e) { err = e.stack; } assert('柄の焼き込み', !err, err);
+  // 描く音: 試合の外では止まる
+  err = null; try { setState('title'); tickMeta(0.016); } catch (e) { err = e.stack; } assert('試合の外では描く音を止める', !err && Snd.voiceCount === 0, err);
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');

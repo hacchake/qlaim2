@@ -31,6 +31,13 @@
   立体のファイターは `updateRival3D`(マスごと。人間は `neighborsToward`、CPU は `planRival3D`: 相手の線を切りに / まっすぐ入って曲がる道 / 線の上を歩く、帰りは `rivalGoHome3D`)。
   RTRAIL の持ち主は `rtOwn`。PARTY の途中決着は `matchTarget()` = 90%。対戦モードの球は地図にしない
 - 画面分割(立体の PARTY で人間2〜3人): `splitHumans()`、`paneRects(n)`(上下に等分)、人間ごとのカメラ `paneCams`、`withCam(pc, fn)` で一時的に切り替えて描画・追従・操作の向き
+- 結果: VS は state 'vsres'(`vsResult`、`drawResultTable`)。勝ちは startClear の得点・記録をしてから vsres に。PARTY は 'partyres' に同じ表と MVP。どちらも最初の1秒は「しゅうりょう!」
+- 成績: `r.kills` / `r.downs`、自機は `vsStat`。rivalFail(r, why, by) の by に加算(by なしで VS の cut/trap は自機の手柄)
+- 描く音(voice): 低めの音域・4段まで・ローパス。死亡時と試合の外(tickMeta)で止める
+- 対戦の設定 state 'matchopts'(`MATCH_ITEMS`: settings.vsCpu / cpuLv / matchTime / stageSel)。ステージ RANDOM は startGame で `shuffleStages()`
+- キーコンフィグ state 'keycfg': `PARTY_KEYS` を書きかえ(`qlaim2.keys` に保存、`DEFAULT_KEYS` に戻す)。ひとり用でも P1 のキーが効く(`p1Dir`、inputVec)
+- 掛け合い: `BANTER` の組を `updateBanter` が7〜13秒ごと(返しは0.9秒後、`banterQ`)。`RIVAL_LINES` に respawn / over / lead / behind / idle も
+- チームの柄: `teamPat(combo)` → `applyTeamPattern`(市松 6マス / 麻の葉 13間隔の6方向の線 / フラワーオブライフ 半径18の円の三角格子)。白を5割まぜた線。ファイターは `r.combo`
 - 魂: `rivalFail` で `r.soul`(やられた位置)、`soulPos(r)` が昇る(前半45%)→ 画面の上から戻る場所へ(後半)。自機のミスは `souls` に昇る魂だけ
 - 生き返り: やられている間は戻る場所にたまる輪、戻った直後は半透明にせずチームの色の輪が広がる(点滅なし)
 - 描く音のハーモニー: ファイターごとに `Snd.voiceStart(id, team)`。チーム0/1/2 が和音の根音/3度/5度から始まり、線が伸びるほど和音の中を上がる(`voiceHz`)。
