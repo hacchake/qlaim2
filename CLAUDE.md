@@ -23,6 +23,9 @@
   持ち主 `ownA`: 0 最初の壁・未所有 / 1 自機 / 2+番号 ファイター / 9 `OWN_NEUTRAL`。広さは `recountAreas()` が数え直す(`ownCount`、`r.area`)
 - 上塗り(アイテム 'over'、`hasRivals()` のときだけ。PARTY はこれだけ出る): `overT` の間は陣地の上も歩け(`canOverWalk`)、`overPaint` が半径2マスを塗る。
   相手 → 中立(`neutralNo` = 2色の混ざった色、`neutralAt` に時刻)、中立 → 自分(中立になって1.2秒たってから)。線(colA 0)と最初の壁は塗らない
+- 色の系統は8つ(`TEAM_SHADES`、`teamHex(t)`、`TEAM_JP`)。中立は28組(`pairIndex`、`neutralNo`)。ファイターの色はすべて `teamHex(r.team)`
+- VS は全員敵同士: CPU は `vsCpuCount(lv)` 人(3人から2ラウンドごとに+1、7人まで)、チームは 1〜7(自機は0)。平面は `perimeterSplit(n+1)` で自機と等間隔。
+  勝ちは自分が1位のとき(`vsRanking()`)。CPU が3人以上なら途中決着は90%
 - チームの人数 `party.size`(1〜5、`PARTY_MAX`)。ファイターは赤黄青の順に交互で `perimeterSplit(n)` に並ぶ。`r.team` / `r.member`。味方の線には入れない。順位・バーは `teamArea(t)`。ownA は 255 = 中立(ファイター番号は 2〜)
 - 立体の対戦(`surfaceFor` は VS/PARTY も TOUR の順): 基地はヌメリンを出したあと `setupRivals3D` → `carveBases3D`(チーム0 = HOME、ほかは HOME・ヌメリンから一番遠いマスに半径 home×1.3 の基地。ふちは線)。
   立体のファイターは `updateRival3D`(マスごと。人間は `neighborsToward`、CPU は `planRival3D`: 相手の線を切りに / まっすぐ入って曲がる道 / 線の上を歩く、帰りは `rivalGoHome3D`)。

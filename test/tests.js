@@ -1474,14 +1474,14 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
 // ---- 94) ナワバリバトル(CPU) ----
 {
   settings.mode = 'VS'; startGame(); setState('play'); buddies = []; sparxes = []; seekers = []; items = [];
-  assert('VS: CPUが出る・制限時間', rivals.length === 1 && vsT === CONFIG.VS_TIME && qixes.length === 1);
+  assert('VS: CPUは3人・全員別の色・制限時間', rivals.length === 3 && new Set(rivals.map(r => r.team).concat([0])).size === 4 && vsT === CONFIG.VS_TIME && qixes.length === 1);
   const r = rivals[0];
   assert('CPUは線の上から始まる', isBoundary(r.c));
   // CPU が陣地を取る
   let t0 = rivalAreaSum();
   for (let i = 0; i < 60 * 25 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); }
   assert('CPUが自分で陣地を取る', rivalAreaSum() > t0, rivalAreaSum());
-  assert('自機とCPUの陣地の合計 = 全体', playerArea() + rivalAreaSum() === claimed);
+  assert('自機とCPUと中立の陣地の合計 = 全体', playerArea() + rivalAreaSum() + neutralArea() === claimed, playerArea() + '+' + rivalAreaSum() + '+' + neutralArea() + ' vs ' + claimed);
   // CPU が自機の線を切る
   startGame(); setState('play'); player.invuln = 0; deathTimer = 0;
   const rr = rivals[0];
@@ -1495,15 +1495,19 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   playerStep(rc);
   assert('自機がCPUの線に触れるとCPUがダウン', rr.dead > 0 && grid[rc] !== RTRAIL);
   // 勝ち負け
-  const fakeArea = (me, cpu) => { let a = 0, b2 = 0; for (let i = 0; i < surf.N; i++) { if (grid[i] !== OPEN) continue; if (a < me) { grid[i] = WALL; ownA[i] = 1; a++; } else if (b2 < cpu) { grid[i] = WALL; ownA[i] = 2; b2++; } } claimed = me + cpu; recountAreas(); };
+  const fakeArea = (me, cpu, cpu2) => { cpu2 = cpu2 || 0; let a = 0, b2 = 0, b3 = 0; for (let i = 0; i < surf.N; i++) { if (grid[i] !== OPEN) continue; if (a < me) { grid[i] = WALL; ownA[i] = 1; a++; } else if (b2 < cpu) { grid[i] = WALL; ownA[i] = 2; b2++; } else if (b3 < cpu2) { grid[i] = WALL; ownA[i] = 3; b3++; } } claimed = me + cpu + cpu2; recountAreas(); };
   startGame(); setState('play'); fakeArea(40, 10);
-  vsEnd(); assert('広いほうが勝ち(自機40 > CPU10)', state === 'clear' && vsWin);
+  vsEnd(); assert('いちばん広ければ勝ち(自機40 > CPU10)', state === 'clear' && vsWin);
+  startGame(); setState('play'); fakeArea(40, 30, 30);
+  vsEnd(); assert('CPUの合計より小さくても、1位なら勝ち(40 > 30, 30)', state === 'clear' && vsWin);
   startGame(); setState('play'); fakeArea(10, 60); const lv0 = lives;
   vsEnd(); assert('せまいと負け', state === 'vslose' && !vsWin);
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('負け画面の描画', !err, err);
   stTimer = 1; onAction(); assert('負けたら残機を1つ使ってやり直し', lives === lv0 - 1 && state === 'ready');
   err = null; try { setState('play'); render(); } catch (e) { err = e.stack; } assert('VSの描画(CPU・バー)', !err, err);
   assert('VSの自機は赤チーム(赤系で揺らぐ)', inkHex() === TEAM_SHADES[0][0] && TEAM_SHADES[0].includes(palHex(inkNo(1))));
+  assert('VSのCPUは2ラウンドごとに増えて7人まで', vsCpuCount(1) === 3 && vsCpuCount(3) === 4 && vsCpuCount(20) === 7);
+  { const pairs = new Set(); for (let a = 0; a < NT; a++) for (let b = a + 1; b < NT; b++) pairs.add(pairIndex(a, b)); assert('中立の色は28組すべて別', pairs.size === 28 && Math.max(...pairs) === 27); }
 }
 
 
@@ -1670,7 +1674,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   assert('立体でもCPUが陣地を取る', rivalAreaSum() > 0);
   // VS の立体
   settings.mode = 'VS'; startGame(); level = 3; initLevel(3); setState('play');
-  assert('VSも立体(球)でCPUが出る', surf.is3D && rivals.length === 1 && isBoundary(rivals[0].c) && !earthMode());
+  assert('VSも立体(球)でCPUが出る(全員別の基地)', surf.is3D && rivals.length === vsCpuCount(3) && rivals.every(r => isBoundary(r.c)) && new Set(rivals.map(r => r.home)).size === rivals.length && !earthMode());
   err = null; try { for (let i = 0; i < 60 * 10 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); } catch (e) { err = e.stack; }
   assert('VSの立体が例外なく進む', !err, err);
   party.slots = [true, true, false]; party.size = 1;

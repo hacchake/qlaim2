@@ -297,7 +297,7 @@ const MODES = ['VS', 'PARTY', 'TOUR', 'DAILY', 'ZEN'].concat(Object.keys(CONFIG.
 function isParty() { return settings.mode === 'PARTY'; }
 function hasRivals() { return isVS() || isParty(); }
 // 途中で決着する占領率: PARTY は大勢で塗るので 90%(ほぼ時間いっぱい遊べる)
-function matchTarget() { return isParty() ? 90 : target(); }
+function matchTarget() { return isParty() || (isVS() && rivals.length >= 3) ? 90 : target(); }
 // VS(ナワバリバトル): 自機と同じことができるCPUと、制限時間内に広い陣地を取ったほうが勝ち
 function isVS() { return settings.mode === 'VS'; }
 // ZEN: のんびりお絵かき。ミスなし・SPARX/SEEKERなし・導火線なし・記録なし。盤面はTOURの順
@@ -328,7 +328,7 @@ function modeLabel(m) {
   return CONFIG.SURF[m].label;
 }
 function modeSub(m) {
-  if (m === 'VS') return 'CPUと陣地の広さで勝負。線を切り合え!';
+  if (m === 'VS') return 'CPU3人以上と全員敵同士。いちばん広い陣地を取れ!';
   if (m === 'PARTY') return '赤・黄・青の3チーム。ひとつの画面で1〜3人+CPU';
   if (m === 'TOUR') return CONFIG.TOUR.length + '種類の盤面を順番に';
   if (m === 'DAILY') return dailyList().map(k => CONFIG.SURF[k].label).join(' → ');
@@ -2233,18 +2233,33 @@ let earthMap = null, earthRot = null;
 /* ---- チームの色: 赤系・黄系・青系を4段階ずつ。陣地を取るたびに系統の中で少し揺らぐ ----
    中立: 相手の陣地を上塗りして2色が混ざった色(赤+黄=オレンジ / 赤+青=紫 / 黄+青=緑)。どのチームのものでもない */
 const TEAM_SHADES = [
-  ['#ff4a4a', '#e8323f', '#ff6a5a', '#d9434f'],     // 赤系
-  ['#ffd22e', '#f5c21a', '#ffe066', '#e6b830'],     // 黄系
-  ['#4a6bff', '#3a58e6', '#5f85ff', '#4b5fd9'],     // 青系
+  ['#ff4a4a', '#e8323f', '#ff6a5a', '#d9434f'],     // 0 赤系
+  ['#ffd22e', '#f5c21a', '#ffe066', '#e6b830'],     // 1 黄系
+  ['#4a6bff', '#3a58e6', '#5f85ff', '#4b5fd9'],     // 2 青系
+  ['#3fcf6a', '#2fb85a', '#5ee082', '#34a860'],     // 3 緑系
+  ['#a86bff', '#9555ee', '#bc88ff', '#8f5cd9'],     // 4 紫系
+  ['#ff8a2a', '#f07818', '#ffa050', '#e0782a'],     // 5 オレンジ系
+  ['#ff5fb8', '#f048a5', '#ff80c8', '#e0559e'],     // 6 ピンク系
+  ['#2fd6d6', '#1fc0c4', '#5ae6e6', '#28b0b8'],     // 7 水色系
 ];
-const NEUTRAL_MIX = { '01': ['#ff9a3a', '#f08a2e'], '02': ['#a45ad9', '#9150c8'], '12': ['#7cc85a', '#6ab84e'] };
-const TEAMC_BASE = EARTH_BASE + 16;                  // colA: チーム色 12 + 中立 6
-const TEAMC_ALL = TEAM_SHADES.flat().concat(NEUTRAL_MIX['01'], NEUTRAL_MIX['02'], NEUTRAL_MIX['12']);
-function teamNo(team) { return TEAMC_BASE + team * 4 + ((Math.random() * 4) | 0); }
-function neutralNo(t1, t2) {
-  const k = [t1, t2].sort().join(''), i = ['01', '02', '12'].indexOf(k);
-  return TEAMC_BASE + 12 + Math.max(0, i) * 2 + ((Math.random() * 2) | 0);
+const TEAM_JP = ['赤', '黄', '青', '緑', '紫', 'オレンジ', 'ピンク', '水色'];
+const NT = TEAM_SHADES.length;
+// 中立の色: 2つの系統の色を混ぜ、少し灰色に寄せる(どのチームの色とも見分けがつくように)。組ごとに2段
+const NEUTRAL_PAIRS = [];
+for (let a = 0; a < NT; a++) for (let b = a + 1; b < NT; b++) {
+  const m = mixRgb(mixRgb(rgbOf(TEAM_SHADES[a][0]), rgbOf(TEAM_SHADES[b][0]), 0.5), [150, 150, 160], 0.25);
+  NEUTRAL_PAIRS.push([hexOf(m), hexOf(mixRgb(m, [0, 0, 0], 0.12))]);
 }
+const NEUTRAL_MIX = { '01': NEUTRAL_PAIRS[0], '02': NEUTRAL_PAIRS[1], '12': NEUTRAL_PAIRS[NT - 1] };
+const TEAMC_BASE = EARTH_BASE + 16;                  // colA: チーム色(8系統×4) + 中立(28組×2)
+const TEAMC_ALL = TEAM_SHADES.flat().concat(NEUTRAL_PAIRS.flat());
+function teamNo(team) { return TEAMC_BASE + team * 4 + ((Math.random() * 4) | 0); }
+function pairIndex(a, b) { if (a > b) [a, b] = [b, a]; let i = 0; for (let x = 0; x < a; x++) i += NT - 1 - x; return i + (b - a - 1); }
+function neutralNo(t1, t2) {
+  if (t1 === t2) return teamNo(t1);
+  return TEAMC_BASE + NT * 4 + pairIndex(t1, t2) * 2 + ((Math.random() * 2) | 0);
+}
+function teamHex(t) { return TEAM_SHADES[t % NT][0]; }
 // 持ち主の番号(ownA): 0 = 最初からある壁・まだ誰のものでもない / 1 = 自機 / 2+番号 = CPU・ファイター / 9 = 中立
 const OWN_NEUTRAL = 255;
 function ownerTeam(o) {
@@ -2493,7 +2508,7 @@ function lineCiCalc(c) {
 const LV = 6;       // 立体面の陰影段階数
 const EARTH_CI0 = 24 + 2 * (13 + 12);  // 地球の色の始まり
 const TEAMC_CI0 = EARTH_CI0 + 16;       // チーム色の始まり
-const NCOL_BASE = TEAMC_CI0 + 18;       // 立体面の固定の色(インク11色+金+白+虹12色とその暗い版+地球16色+チーム・中立18色)
+const NCOL_BASE = TEAMC_CI0 + 8 * 4 + 28 * 2;   // 立体面の固定の色(インク・虹とその暗い版+地球16色+チーム8系統×4+中立28組×2)
 const MIX_SLOTS = 120;                  // 模様・グラデーション用に、その場で作る混ぜ色の枠
 const NCOL = NCOL_BASE + MIX_SLOTS;
 const FLASH_CI = 23; // 塗りの波の光
@@ -4390,18 +4405,18 @@ function drawRivals3D(t) {
         if (pen) path.lineTo(p.x, p.y); else { path.moveTo(p.x, p.y); pen = true; }
         prev = p;
       }
-      inkBand(path, INK_COLORS[r.col], 5.5);
+      inkBand(path, teamHex(r.team), 5.5);
     }
     if (r.dead > 0) continue;
     const p = surf.screenOf(r.c);
-    if (!visA[r.c]) { drawOffMarker(p, INK_COLORS[r.col], 5); continue; }
-    if (r.inv > 0) { const k = 1 - r.inv / 1.5; ctx.globalAlpha = 1 - k; ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y - 4, 10 + k * 22, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+    if (!visA[r.c]) { drawOffMarker(p, teamHex(r.team), 5); continue; }
+    if (r.inv > 0) { const k = 1 - r.inv / 1.5; ctx.globalAlpha = 1 - k; ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y - 4, 10 + k * 22, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
     if (r.overT > 0) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(p.x, p.y - 4, 14, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
-    drawClawd(p.x, p.y - 3, 1.6, { col: INK_COLORS[r.col], moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing });
-    ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
+    drawClawd(p.x, p.y - 3, 1.6, { col: teamHex(r.team), moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing });
+    ctx.fillStyle = teamHex(r.team); ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
     ctx.fillText(r.name || 'CPU', p.x, p.y + 13);
     if (r.human) { ctx.beginPath(); ctx.moveTo(p.x - 5, p.y - 20); ctx.lineTo(p.x + 5, p.y - 20); ctx.lineTo(p.x, p.y - 14); ctx.closePath(); ctx.fill(); }
-    if (r.sayT > 0) drawBubble(p.x, p.y - 12, r.sayTxt, Math.min(1, r.sayT * 3), INK_COLORS[r.col]);
+    if (r.sayT > 0) drawBubble(p.x, p.y - 12, r.sayTxt, Math.min(1, r.sayT * 3), teamHex(r.team));
   }
 }
 /* ---- 画面分割(立体の PARTY で人間が2〜3人のとき) ----
@@ -4468,10 +4483,10 @@ function renderSplit(t, hs) {
     });
     ctx.restore();
     // 境目と、だれの画面か
-    ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3;
+    ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 3;
     ctx.strokeRect(rc.x + 1.5, rc.y + 1.5, rc.w - 3, rc.h - 3);
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(rc.x + 8, rc.y + rc.h - 30, 64, 22);
-    ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 15px 'Courier New', monospace"; ctx.textAlign = 'left';
+    ctx.fillStyle = teamHex(r.team); ctx.font = "bold 15px 'Courier New', monospace"; ctx.textAlign = 'left';
     ctx.fillText(r.name + (r.dead > 0 ? ' …' : ''), rc.x + 14, rc.y + rc.h - 13);
   });
 }
@@ -4521,8 +4536,8 @@ function drawSouls(inPane) {
   for (const r of rivals) {
     if (r.dead <= 0) continue;
     const q = soulPos(r);
-    drawSoul(q.x, q.y, INK_COLORS[r.col], q.a, q.up);
-    if (!inPane && Math.random() < 0.35) particles.push({ x: q.x + rand(-4, 4), y: q.y + rand(-4, 4), vx: rand(-8, 8), vy: q.up ? rand(10, 30) : rand(-30, -10), t: rand(0.3, 0.6), col: INK_COLORS[r.col], r: rand(1, 2) });
+    drawSoul(q.x, q.y, teamHex(r.team), q.a, q.up);
+    if (!inPane && Math.random() < 0.35) particles.push({ x: q.x + rand(-4, 4), y: q.y + rand(-4, 4), vx: rand(-8, 8), vy: q.up ? rand(10, 30) : rand(-30, -10), t: rand(0.3, 0.6), col: teamHex(r.team), r: rand(1, 2) });
   }
   if (inPane) return;
   for (const so of souls) {
@@ -4538,7 +4553,7 @@ function drawSouls(inPane) {
 function fighterOver(r, it) {
   r.overT = CONFIG.OVER_TIME;
   const p = surf.screenOf(it.c);
-  floats.push({ x: p.x, y: p.y - 14, txt: r.name + ' 上塗り!', t: 1.6, col: INK_COLORS[r.col], big: true });
+  floats.push({ x: p.x, y: p.y - 14, txt: r.name + ' 上塗り!', t: 1.6, col: teamHex(r.team), big: true });
   Snd.item('over');
 }
 function overPaintAt(a, own, team) {
@@ -4766,8 +4781,11 @@ function drawPartyHud() {
    自機と同じことができる相手。線の上を歩き、空き地へ自由に線を引いて、自分の色で陣地を取る。
    自機の描きかけの線を狙って切りにくる。CPUの線に自機が触れる/ヌメリン・バチッコに当たる/陣地で囲まれると、
    CPUはやられて少しあとに戻ってくる(ボンバーマンのように) */
-const RIVAL_COLS = [8, 5];               // CPUのインク(INK_COLORS の番号: 青・黄。陣地はチームの系統で揺らぐ)
-const RIVAL_NAMES = ['アオ', 'ムラサキ'];
+const RIVAL_COLS = [8, 5];               // (昔の名残。ファイターの色は teamHex(r.team))
+// VS の CPU の名前: チームの色の名前
+const RIVAL_NAMES = ['アカ', 'キイロ', 'アオ', 'ミドリ', 'ムラサキ', 'オレンジ', 'ピンク', 'ミズイロ'];
+// VS の CPU の数: 3人から、2ラウンドごとに1人ずつ増えて7人まで(全員敵同士)
+function vsCpuCount(lv) { return Math.min(7, 3 + Math.floor((lv - 1) / 2)); }
 const RIVAL_LINES = {
   start: ['負けないぞ!', 'ナワバリはもらった!', 'よーい、ぬり!'],
   claim: ['いただき!', 'ぬりぬり〜', 'ここはボクの!'],
@@ -4777,9 +4795,9 @@ const RIVAL_LINES = {
 let rivals = [], vsT = 0, vsWin = false, ownA = new Uint8Array(0);
 function makeRival(i) {
   const home = idx(i ? (GW * 3) >> 2 : GW >> 2, 0);
-  return { id: i, team: i === 0 ? 2 : 1, c: home, home, fx: 0, fy: 0, vx: 0, vy: 1, look: 1, drawing: false, trail: [], pts: [], plan: [], fast: false,
+  return { id: i, team: (i + 1) % NT, c: home, home, fx: 0, fy: 0, vx: 0, vy: 1, look: 1, drawing: false, trail: [], pts: [], plan: [], fast: false,
            dead: 0, inv: 1.5, area: 0, stuck: 0, think: rand(0.3, 1.0), sayTxt: '', sayT: 0,
-           col: RIVAL_COLS[i % RIVAL_COLS.length], name: RIVAL_NAMES[i % RIVAL_NAMES.length] };
+           col: RIVAL_COLS[i % RIVAL_COLS.length], name: RIVAL_NAMES[(i + 1) % RIVAL_NAMES.length] };
 }
 // 外周を1周する順のマス(下の真ん中から時計回り)を3等分した場所 = 3人のスタート地点(どこからでも公平)
 function perimeterThirds() { return perimeterSplit(3); }
@@ -4805,12 +4823,12 @@ function setupRivals3D(lv) {
   paneCams = {};
   if (!hasRivals()) return;
   {
-    const vs = isVS(), n = vs ? (lv >= 4 ? 2 : 1) : 3 * party.size;
+    const vs = isVS(), n = vs ? vsCpuCount(lv) : 3 * party.size;
     const teams = vs ? 1 + n : 3, per = vs ? 1 : party.size;
     const starts = carveBases3D(teams, per);
     for (let k = 0; k < n; k++) {
       const r = makeRival(k);
-      if (vs) { r.team = k === 0 ? 2 : 1; const st = starts[k + 1]; r.home = r.c = st[0]; r.col = RIVAL_COLS[k % RIVAL_COLS.length]; }
+      if (vs) { r.team = (k + 1) % NT; const st = starts[k + 1]; r.home = r.c = st[0]; }
       else {
         const t = k % 3, m = (k / 3) | 0, st = starts[t];
         r.team = t; r.member = m; r.col = TEAM_COLS[t]; r.home = r.c = st[m % st.length];
@@ -4839,8 +4857,8 @@ function setupRivalsPlane(lv) {
     return;
   }
   if (!isVS() || surf.is3D) return;
-  const n = lv >= 4 ? 2 : 1;
-  for (let i = 0; i < n; i++) { const r = makeRival(i); syncPos(r); rivals.push(r); }
+  const n = vsCpuCount(lv), homes = perimeterSplit(n + 1);     // 0 番目 = 自機のスタート(下の真ん中)
+  for (let i = 0; i < n; i++) { const r = makeRival(i); r.home = r.c = homes[i + 1]; syncPos(r); rivals.push(r); }
   vsT = CONFIG.VS_TIME; vsWin = false;
   if (rivals[0] && state !== 'title') rivalSay(rivals[0], 'start');
 }
@@ -4860,7 +4878,7 @@ function rivalTrailCells() { return rivals.reduce((a, r) => a + r.trail.length, 
 // CPU の強さ: エリアが進むほど速く、ずる賢く
 function rivalSkill() {
   if (isParty()) return Math.min(1, [0.3, 0.55, 0.85][party.cpu] + (level - 1) * 0.04);
-  return Math.min(1, 0.35 + (level - 1) * 0.12);
+  return Math.min(1, 0.3 + (level - 1) * 0.08);
 }
 
 function rivalStep(r, n) {
@@ -4915,7 +4933,7 @@ function rivalClose(r) {
   if (!player.drawing && !isBoundary(player.c)) snapPlayerToBoundary();
   if (gained > 20) {
     const p = surf.screenOf(r.c);
-    floats.push({ x: p.x, y: p.y - 12, txt: r.name + ' +' + (gained / initOpen * 100).toFixed(1) + '%', t: 1.2, col: INK_COLORS[r.col] });
+    floats.push({ x: p.x, y: p.y - 12, txt: r.name + ' +' + (gained / initOpen * 100).toFixed(1) + '%', t: 1.2, col: teamHex(r.team) });
     Snd.splat(0.08);
     if (Math.random() < 0.4) rivalSay(r, 'claim');
   }
@@ -4945,22 +4963,22 @@ function rivalFail(r, why, by) {
   r.drawing = false; r.trail = []; r.pts = []; r.plan = [];
   r.dead = CONFIG.RIVAL_RESPAWN;
   rivalSay(r, 'down');
-  spawnParticles(p.x, p.y, 34, INK_COLORS[r.col]);
-  rings.push({ x: p.x, y: p.y, t: 0, col: INK_COLORS[r.col] });
+  spawnParticles(p.x, p.y, 34, teamHex(r.team));
+  rings.push({ x: p.x, y: p.y, t: 0, col: teamHex(r.team) });
   Snd.splat(0.2); Snd.bell(330, 0.06);
   if (isParty()) {
-    floats.push({ x: p.x, y: p.y - 16, txt: (by ? by.name + 'が' : '') + r.name + 'をダウン!', t: 1.6, col: by ? INK_COLORS[by.col] : INK_COLORS[r.col], big: true });
+    floats.push({ x: p.x, y: p.y - 16, txt: (by ? by.name + 'が' : '') + r.name + 'をダウン!', t: 1.6, col: by ? teamHex(by.team) : teamHex(r.team), big: true });
     if (r.human) buzz(120, 0.8);
   } else if (why === 'cut' || why === 'trap') {
     score += 800 * surf.def.pts;
     floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン! +' + 800 * surf.def.pts, t: 1.6, col: '#ffd76b', big: true });
     sayLine('catch', 1.2, true);
-  } else floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン!', t: 1.4, col: INK_COLORS[r.col] });
+  } else floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン!', t: 1.4, col: teamHex(r.team) });
 }
 function respawnRival(r) {
   const hp = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS }, hx = hp.x, hy = hp.y;
-  spawnParticles(hx, hy, 18, INK_COLORS[r.col]);
-  floats.push({ x: hx, y: hy - 30, txt: r.name + ' 復活!', t: 1.2, col: INK_COLORS[r.col] });
+  spawnParticles(hx, hy, 18, teamHex(r.team));
+  floats.push({ x: hx, y: hy - 30, txt: r.name + ' 復活!', t: 1.2, col: teamHex(r.team) });
   r.c = r.home;                                      // スタート地点(埋もれていたら、そこから一番近い線)
   if (!isBoundary(r.c)) snapActor(r);
   syncPos(r); r.inv = 1.5; r.plan = [];
@@ -5177,10 +5195,10 @@ function vsEnd() {
   Snd.voiceStopAll();
   cancelTrail();
   for (const r of rivals) { for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN; r.drawing = false; r.trail = []; r.pts = []; }
-  const me = playerArea(), cpu = rivalAreaSum();
-  vsWin = me > cpu;
+  const me = playerArea(), best = Math.max(0, ...rivals.map(r => r.area));
+  vsWin = me > best;                                 // 全員敵同士: 自分がいちばん広ければ勝ち
   if (vsWin) {
-    floats.push({ x: W / 2, y: FIELD_Y + 120, txt: 'WIN!  ' + (me / initOpen * 100).toFixed(1) + '% vs ' + (cpu / initOpen * 100).toFixed(1) + '%', t: 2.5, col: '#7bffa0', big: true });
+    floats.push({ x: W / 2, y: FIELD_Y + 120, txt: 'WIN!  1位 ' + (me / initOpen * 100).toFixed(1) + '%', t: 2.5, col: '#7bffa0', big: true });
     startClear(false);
   } else {
     Snd.stopDraw(); Bgm.stop(); Snd.over();
@@ -5203,14 +5221,14 @@ function drawRivals(t) {
       const path = new Path2D(), pp = r.pts.concat([[r.fx, r.fy]]);
       path.moveTo(pp[0][0] * CS, FIELD_Y + pp[0][1] * CS);
       for (let i = 1; i < pp.length; i++) path.lineTo(pp[i][0] * CS, FIELD_Y + pp[i][1] * CS);
-      inkBand(path, INK_COLORS[r.col], CS * 1.35);
+      inkBand(path, teamHex(r.team), CS * 1.35);
     }
     if (r.dead > 0) {                                // やられている間: 戻ってくる場所に、たまっていく輪
       const hx = ((r.home % GW) + 0.5) * CS, hy = FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS, k = 1 - r.dead / CONFIG.RIVAL_RESPAWN;
       ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(hx, hy, 16, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 4;
+      ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(hx, hy, 16, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 11px 'Courier New', monospace"; ctx.textAlign = 'center';
+      ctx.fillStyle = teamHex(r.team); ctx.font = "bold 11px 'Courier New', monospace"; ctx.textAlign = 'center';
       ctx.fillText(r.name, hx, hy + 4);
       continue;
     }
@@ -5218,7 +5236,7 @@ function drawRivals(t) {
     const x = r.fx * CS, y = FIELD_Y + r.fy * CS, s = 2;
     if (r.inv > 0) {                                 // 戻ってきた直後: 半透明にせず、チームの色の輪が広がる
       const k = 1 - r.inv / 1.5;
-      for (const d of [0, 0.5]) { const kk = (k + d) % 1; ctx.globalAlpha = 1 - kk; ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3;
+      for (const d of [0, 0.5]) { const kk = (k + d) % 1; ctx.globalAlpha = 1 - kk; ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(x, y - 4, 12 + kk * 26, 0, Math.PI * 2); ctx.stroke(); }
       ctx.globalAlpha = 1;
     }
@@ -5228,32 +5246,41 @@ function drawRivals(t) {
     ctx.lineCap = 'round';
     ctx.strokeStyle = '#2a2230'; ctx.lineWidth = 4.2 * s;
     ctx.beginPath(); ctx.moveTo(rx - ax * half, ry - ay * half); ctx.lineTo(rx + ax * half, ry + ay * half); ctx.stroke();
-    ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3 * s;
+    ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 3 * s;
     ctx.beginPath(); ctx.moveTo(rx - ax * half, ry - ay * half); ctx.lineTo(rx + ax * half, ry + ay * half); ctx.stroke();
     if (r.overT > 0) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.lineDashOffset = -blinkT * 20;
       ctx.beginPath(); ctx.arc(x, y - 4, 16, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = '#ffffff'; ctx.font = "bold 11px 'Courier New', monospace"; ctx.textAlign = 'center';
       ctx.fillText('上塗り ' + Math.ceil(r.overT), x, y - 26); }
-    drawClawd(x, y - s * 2, s, { col: INK_COLORS[r.col], moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing, look: r.look < 0 ? -1 : 1 });
+    drawClawd(x, y - s * 2, s, { col: teamHex(r.team), moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing, look: r.look < 0 ? -1 : 1 });
     ctx.globalAlpha = 1;
-    ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
+    ctx.fillStyle = teamHex(r.team); ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
     ctx.fillText(r.name || 'CPU', x, y + 16);
-    if (r.human) { ctx.fillStyle = INK_COLORS[r.col]; ctx.beginPath(); ctx.moveTo(x - 5, y - 24); ctx.lineTo(x + 5, y - 24); ctx.lineTo(x, y - 18); ctx.closePath(); ctx.fill(); }
-    if (r.sayT > 0) drawBubble(x, y - 14, r.sayTxt, Math.min(1, r.sayT * 3), INK_COLORS[r.col]);
+    if (r.human) { ctx.fillStyle = teamHex(r.team); ctx.beginPath(); ctx.moveTo(x - 5, y - 24); ctx.lineTo(x + 5, y - 24); ctx.lineTo(x, y - 18); ctx.closePath(); ctx.fill(); }
+    if (r.sayT > 0) drawBubble(x, y - 14, r.sayTxt, Math.min(1, r.sayT * 3), teamHex(r.team));
   }
 }
 // ナワバリバトルの上の表示: 陣地の割合のバーと残り時間
+// 自機と CPU の広さの順位(全員敵同士)
+function vsRanking() {
+  return [{ me: true, name: 'YOU', area: playerArea(), col: teamHex(0) }]
+    .concat(rivals.map(r => ({ me: false, name: r.name, area: r.area, col: teamHex(r.team) })))
+    .sort((a, b) => b.area - a.area);
+}
 function drawVsHud() {
-  const me = playerArea() / initOpen, cpu = rivalAreaSum() / initOpen, x = 150, y = FIELD_Y + 34, w = W - 300, h = 14;
+  const x = 120, y = FIELD_Y + 34, w = W - 240, h = 14;
   ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
   ctx.fillStyle = '#2a3150'; ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = inkHex(); ctx.fillRect(x, y, w * me, h);
-  ctx.fillStyle = '#8a8fa8'; ctx.fillRect(x + w * me, y, w * neutralArea() / initOpen, h);
-  let cx = x + w;
-  for (const r of rivals) { const a = r.area / initOpen * w; cx -= a; ctx.fillStyle = INK_COLORS[r.col]; ctx.fillRect(cx, y, a, h); }
+  const rk = vsRanking();
+  let cx = x;
+  for (const e of rk) { const a = e.area / initOpen * w; ctx.fillStyle = e.col; ctx.fillRect(cx, y, a, h); if (e.me) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(cx, y, a, h); } cx += a; }
+  ctx.fillStyle = '#8a8fa8'; ctx.fillRect(cx, y, w * neutralArea() / initOpen, h);
+  const myRank = rk.findIndex(e => e.me) + 1;
   ctx.font = "bold 12px 'Courier New', monospace";
-  ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff'; ctx.fillText('YOU ' + (me * 100).toFixed(1) + '%', x, y + h + 14);
-  ctx.textAlign = 'right'; ctx.fillText((cpu * 100).toFixed(1) + '% CPU', x + w, y + h + 14);
+  ctx.textAlign = 'left'; ctx.fillStyle = myRank === 1 ? '#7bffa0' : '#ffffff';
+  ctx.fillText('YOU ' + (playerArea() / initOpen * 100).toFixed(1) + '%  ' + myRank + '位/' + rk.length + '人', x, y + h + 14);
+  ctx.textAlign = 'right'; ctx.fillStyle = rk[0].col;
+  ctx.fillText('1位 ' + rk[0].name + ' ' + (rk[0].area / initOpen * 100).toFixed(1) + '%', x + w, y + h + 14);
   ctx.textAlign = 'center';
   const tm = Math.ceil(vsT);
   ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
@@ -6209,7 +6236,7 @@ function drawBackView(t) {
   for (const sp of sparxes) dot(cw(sp.c), '#ff5a28', 3);
   for (const k of seekers) dot(cw(k.c), '#ff5cf0', 3.5);
   for (const b of buddies) dot(cw(b.c), BUDDIES[b.k].role === 'ally' ? '#9dffea' : '#ffd76b', 3);
-  for (const r of rivals) if (r.dead <= 0) dot(cw(r.c), INK_COLORS[r.col], 3);
+  for (const r of rivals) if (r.dead <= 0) dot(cw(r.c), teamHex(r.team), 3);
   for (const q of qixes) dot(S.world(q.p || [q.x, q.y]), qixStroke(q.hue, 60, 1), 4.5);
   ctx.fillStyle = '#8fa3d9';
   ctx.font = "bold 10px 'Courier New', monospace";
@@ -7038,14 +7065,18 @@ function renderOverlay() {
   if (state === 'lobby') { drawLobby(t); return; }
   if (state === 'partyres') { drawPartyRes(t); return; }
   if (state === 'vslose') {
-    panel(90, 300, W - 180, 220);
+    panel(90, 300, W - 180, 230);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ff8fa8'; ctx.font = "bold 30px 'Courier New', monospace";
-    ctx.fillText('LOSE…', W / 2, 352);
+    ctx.fillText('LOSE…', W / 2, 348);
     ctx.fillStyle = '#ffffff'; ctx.font = "bold 17px 'Courier New', monospace";
-    ctx.fillText('YOU ' + (playerArea() / initOpen * 100).toFixed(1) + '%  vs  CPU ' + (rivalAreaSum() / initOpen * 100).toFixed(1) + '%', W / 2, 396);
+    const rk = vsRanking(), myRank = rk.findIndex(e => e.me) + 1;
+    ctx.fillText(myRank + '位 / ' + rk.length + '人   YOU ' + (playerArea() / initOpen * 100).toFixed(1) + '%', W / 2, 390);
+    ctx.font = "bold 13px 'Courier New', monospace";
+    rk.slice(0, 4).forEach((e, i) => { ctx.fillStyle = e.col; ctx.fillText((i + 1) + '位 ' + e.name + ' ' + (e.area / initOpen * 100).toFixed(1) + '%', W / 2, 414 + i * 16); });
     ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 15px 'Courier New', monospace";
-    if (stTimer > 0.8) ctx.fillText(lives > 0 ? 'Z / タップ でもう一度 (残機 -1)' : 'Z / タップ で おしまい', W / 2, 460);
+    ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 15px 'Courier New', monospace";
+    if (stTimer > 0.8) ctx.fillText(lives > 0 ? 'Z / タップ でもう一度 (残機 -1)' : 'Z / タップ で おしまい', W / 2, 496);
     return;
   }
   if (state === 'clear') {
@@ -7069,7 +7100,7 @@ function renderOverlay() {
     } else {
       ctx.fillStyle = '#7bffa0';
       ctx.font = "bold 32px 'Courier New', monospace";
-      ctx.fillText(isVS() ? 'WIN!  ' + (playerArea() / initOpen * 100).toFixed(0) + '% vs ' + (rivalAreaSum() / initOpen * 100).toFixed(0) + '%' : 'AREA CLEAR!', W / 2, 356);
+      ctx.fillText(isVS() ? 'WIN! 1位  ' + (playerArea() / initOpen * 100).toFixed(0) + '%' : 'AREA CLEAR!', W / 2, 356);
     }
     ctx.fillStyle = '#ffffff';
     ctx.font = "bold 17px 'Courier New', monospace";
