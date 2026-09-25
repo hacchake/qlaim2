@@ -1513,17 +1513,18 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   onAction(); assert('PARTY: タイトルで決定するとロビー', state === 'lobby');
   lobbyKey('z', true); assert('押しっぱなし(キーリピート)ではスタートしない', state === 'lobby');
   stTimer = 1;
-  party.slots = [true, false, false]; party.sel = 1; lobbyKey('ArrowRight');
+  party.slots = [true, false, false]; party.size = 1; party.sel = 1; lobbyKey('ArrowRight');
   assert('ロビー: 黄を人間に切り替え', party.slots[1] === true);
   party.sel = 2; lobbyKey('z'); assert('ロビー: Zでも切り替え(青=人間)', party.slots[2] === true);
   lobbyKey('z'); assert('もう一度で青=CPU', party.slots[2] === false);
-  party.sel = 3; lobbyKey('ArrowRight'); lobbyKey('ArrowRight'); assert('ロビー: CPUの強さを変える', party.cpu !== undefined);
+  party.sel = 4; lobbyKey('ArrowRight'); lobbyKey('ArrowRight'); assert('ロビー: CPUの強さを変える', party.cpu !== undefined);
+  party.sel = 3; lobbyKey('ArrowRight'); assert('ロビー: 1チームの人数を増やす', party.size === 2); lobbyKey('ArrowLeft');
   party.cpu = 2;
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('ロビーの描画', !err, err);
   // タップ: 青の行をタップすると切り替わる
   const rr = lobbyRects.find(q => q.act === 'slot' && q.i === 2);
   lobbyTap({ x: rr.x + 10, y: rr.y + 10 }); assert('タップで青を人間に', party.slots[2] === true);
-  lobbyTap({ x: rr.x + 10, y: rr.y + 10 }); party.sel = 4;
+  lobbyTap({ x: rr.x + 10, y: rr.y + 10 }); party.sel = 5;
   // タイトルのタップでもロビーへ
   backToTitle(); onAction(); stTimer = 1;
   lobbyKey('z');
@@ -1553,7 +1554,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   // 試合終了と順位
   { let n = [30, 50, 10]; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) { for (let t2 = 0; t2 < 3; t2++) if (n[t2] > 0) { grid[i] = WALL; ownA[i] = 2 + t2; n[t2]--; break; } } recountAreas(); }
   partyEnd();
-  assert('時間切れで順位(黄=P2が1位)', state === 'partyres' && partyRank[0] === rivals[1] && partyRank[2] === rivals[2]);
+  assert('時間切れで順位(黄=P2が1位)', state === 'partyres' && partyRank[0].team === 1 && partyRank[2].team === 2);
   err = null; try { render(); } catch (e) { err = e.stack; } assert('結果画面の描画', !err, err);
   stTimer = 1; onKeyDown({ key: 'z', preventDefault() {} });
   assert('Zで次のラウンド', state === 'ready' && level === 2 && rivals.length === 3);
@@ -1609,6 +1610,34 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   try { const r = rivals[1]; rivalFail(r, 'qix'); render(); r.dead = 0.001; updateRivals(0.01); render(); } catch (e) { err = e.stack; }
   assert('やられている間の輪・復活の輪の描画', !err && rivals[1].dead === 0 && rivals[1].inv > 0, err);
   settings.mode = 'VS';
+}
+
+
+// ---- 98) 魂の演出・チームの人数 ----
+{
+  settings.mode = 'PARTY'; party.slots = [true, false, false]; party.size = 5; startGame(); setState('play');
+  assert('1チーム5人で15人', rivals.length === 15 && rivals.filter(r => r.team === 0).length === 5 && rivals.filter(r => r.human).length === 1);
+  assert('並びは赤・黄・青の交互', rivals.slice(0, 6).map(r => r.team).join() === '0,1,2,0,1,2');
+  // 味方の線には入れない
+  const a = rivals[0], b = rivals[3];
+  b.drawing = true; const bc = idx(40, 80); grid[bc] = RTRAIL; b.trail = [bc];
+  a.drawing = true; a.trail = [];
+  assert('味方の線は切らない(入れない)', rivalStep(a, bc) === false && b.dead <= 0);
+  grid[bc] = OPEN; b.trail = []; b.drawing = false; a.drawing = false;
+  // 魂: 昇って、戻ってくる
+  const r = rivals[4]; rivalFail(r, 'qix');
+  r.dead = CONFIG.RIVAL_RESPAWN * 0.8; const up = soulPos(r);
+  r.dead = CONFIG.RIVAL_RESPAWN * 0.3; const back = soulPos(r);
+  r.dead = 0.0001; const last = soulPos(r);
+  const home = { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS };
+  assert('魂はまず上へ昇る', up.up && up.y < r.soul.y);
+  assert('復活の前に戻る場所へ着く', !back.up && Math.hypot(last.x - home.x, last.y - home.y) < 3);
+  let err = null; try { render(); death('テスト'); render(); } catch (e) { err = e.stack; } assert('魂の描画(ファイター・自機)', !err, err);
+  // 15人でも重すぎない(40秒ぶんの更新)
+  const t0 = Date.now(); let f = 0;
+  for (; f < 60 * 20 && state === 'play'; f++) { blinkT += 1 / 60; update(1 / 60); }
+  assert('15人でも1フレーム2ms未満(更新)', (Date.now() - t0) / Math.max(1, f) < 2, ((Date.now() - t0) / f).toFixed(2));
+  party.size = 1; settings.mode = 'VS';
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');

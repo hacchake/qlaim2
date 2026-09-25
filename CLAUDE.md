@@ -23,6 +23,8 @@
   持ち主 `ownA`: 0 最初の壁・未所有 / 1 自機 / 2+番号 ファイター / 9 `OWN_NEUTRAL`。広さは `recountAreas()` が数え直す(`ownCount`、`r.area`)
 - 上塗り(アイテム 'over'、`hasRivals()` のときだけ。PARTY はこれだけ出る): `overT` の間は陣地の上も歩け(`canOverWalk`)、`overPaint` が半径2マスを塗る。
   相手 → 中立(`neutralNo` = 2色の混ざった色、`neutralAt` に時刻)、中立 → 自分(中立になって1.2秒たってから)。線(colA 0)と最初の壁は塗らない
+- チームの人数 `party.size`(1〜5、`PARTY_MAX`)。ファイターは赤黄青の順に交互で `perimeterSplit(n)` に並ぶ。`r.team` / `r.member`。味方の線には入れない。順位・バーは `teamArea(t)`。ownA は 255 = 中立(ファイター番号は 2〜)
+- 魂: `rivalFail` で `r.soul`(やられた位置)、`soulPos(r)` が昇る(前半45%)→ 画面の上から戻る場所へ(後半)。自機のミスは `souls` に昇る魂だけ
 - 生き返り: やられている間は戻る場所にたまる輪、戻った直後は半透明にせずチームの色の輪が広がる(点滅なし)
 - 描く音のハーモニー: ファイターごとに `Snd.voiceStart(id, team)`。チーム0/1/2 が和音の根音/3度/5度から始まり、線が伸びるほど和音の中を上がる(`voiceHz`)。
   左右は画面の位置。状態が変わるとき `voiceStopAll`

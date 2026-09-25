@@ -1187,7 +1187,7 @@ const Snd = (() => {
     return b * Math.pow(2, (VOICE_CH[st % 3] + 12 * Math.floor(st / 3)) / 12);
   }
   function voiceStart(id, role, pan) {
-    if (!ac || voices.has(id)) return;
+    if (!ac || voices.has(id) || voices.size >= 6) return;       // 重ならないよう同時に6つまで
     const t = ac.currentTime, g = ac.createGain(), o1 = ac.createOscillator(), o2 = ac.createOscillator();
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.028, t + 0.06);
     o1.type = 'triangle'; o2.type = 'sine'; o2.detune.value = 6;
@@ -2242,7 +2242,7 @@ function neutralNo(t1, t2) {
   return TEAMC_BASE + 12 + Math.max(0, i) * 2 + ((Math.random() * 2) | 0);
 }
 // 持ち主の番号(ownA): 0 = 最初からある壁・まだ誰のものでもない / 1 = 自機 / 2+番号 = CPU・ファイター / 9 = 中立
-const OWN_NEUTRAL = 9;
+const OWN_NEUTRAL = 255;
 function ownerTeam(o) {
   if (o === 1) return 0;                              // 自機は赤チーム
   if (o >= 2 && o < OWN_NEUTRAL) { const r = rivals[o - 2]; return r ? r.team : 0; }
@@ -4202,6 +4202,54 @@ function updateQixes(dt) {
   }
 }
 
+/* ---------------- 魂(やられた / 復活の演出) ----------------
+   やられると、チームの色の魂がゆらゆら昇って画面の外へ。復活の前には画面の上から魂が飛んできて、
+   戻る場所にぴったり着いたところで復活する。自機がやられたときも昇る魂を出す */
+let souls = [];                                      // 自機など: { x, y, col, t }
+function soulPos(r) {
+  const k = 1 - r.dead / CONFIG.RIVAL_RESPAWN;      // 0 → 1
+  const home = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS };
+  const s0 = r.soul || home, top = FIELD_Y - 60;
+  if (k < 0.45) {                                    // 昇る
+    const u = k / 0.45, e = u * u;
+    return { x: s0.x + Math.sin(u * 9) * 10 * (1 - u * 0.5), y: s0.y + (top - s0.y) * e, a: 1 - u * 0.4, up: true };
+  }
+  const u = (k - 0.45) / 0.55, e = 1 - Math.pow(1 - u, 3);   // 戻ってくる(最後はゆっくり)
+  const sx = home.x + (s0.side || 1) * 90;
+  return { x: sx + (home.x - sx) * e + Math.sin(u * Math.PI) * 40 * (s0.side || 1), y: top + (home.y - top) * e, a: 0.6 + u * 0.4, up: false };
+}
+function drawSoul(x, y, col, a, up) {
+  ctx.globalAlpha = a;
+  const g = ctx.createRadialGradient(x, y, 1, x, y, 20);
+  g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill();
+  // しっぽ(進む向きの反対へ、ゆらゆら)
+  const dir = up ? 1 : -1;
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x - 7, y);
+  ctx.quadraticCurveTo(x - 6 + Math.sin(blinkT * 8) * 4, y + dir * 14, x + Math.sin(blinkT * 6) * 3, y + dir * 22);
+  ctx.quadraticCurveTo(x + 6, y + dir * 12, x + 7, y);
+  ctx.arc(x, y, 7, 0, Math.PI, dir > 0);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI * 2); ctx.globalAlpha = a * 0.35; ctx.fill();
+  ctx.globalAlpha = a; ctx.fillStyle = '#10121e';
+  ctx.fillRect(x - 3.5, y - 2, 2, 3); ctx.fillRect(x + 1.5, y - 2, 2, 3);
+  ctx.globalAlpha = 1;
+}
+function drawSouls(dt) {
+  for (const r of rivals) {
+    if (r.dead <= 0) continue;
+    const q = soulPos(r);
+    drawSoul(q.x, q.y, INK_COLORS[r.col], q.a, q.up);
+    if (Math.random() < 0.35) particles.push({ x: q.x + rand(-4, 4), y: q.y + rand(-4, 4), vx: rand(-8, 8), vy: q.up ? rand(10, 30) : rand(-30, -10), t: rand(0.3, 0.6), col: INK_COLORS[r.col], r: rand(1, 2) });
+  }
+  for (const so of souls) {
+    so.t += 1 / 60;
+    drawSoul(so.x + Math.sin(so.t * 9) * 8, so.y - so.t * so.t * 260, so.col, Math.max(0, 1 - so.t / 1.6), true);
+  }
+  souls = souls.filter(so => so.t < 1.6);
+}
+
 /* ---------------- 上塗り ----------------
    アイテム「上塗り」を取ると、しばらく陣地の上も走れて、通ったところを塗る。
    相手の陣地 → 2色が混ざって中立(だれのものでもない) / 中立 → 自分の陣地 / 線(境界)と最初からある壁は塗らない */
@@ -4249,10 +4297,12 @@ const PARTY_KEYS = [
   { u: ['KeyI'], d: ['KeyK'], l: ['KeyJ'], r: ['KeyL'], f: ['BracketRight', 'Semicolon', 'KeyU'] },
 ];
 // slots: 赤・黄・青がそれぞれ人間か(true)CPUか(false)。cpu: CPUの強さ 0=よわい 1=ふつう 2=つよい。sel: ロビーのカーソル
-const party = { slots: [true, true, false], cpu: 1, sel: 4 };
-{ const sv = store.get('qlaim.party', {}); if (Array.isArray(sv.slots) && sv.slots.length === 3) party.slots = sv.slots.map(Boolean); if (sv.cpu != null) party.cpu = clamp(sv.cpu | 0, 0, 2); }
+// size: 1チームの人数(1〜5)。2人目からはCPU。3チーム×5人=15人まで(重さを測って決めた上限)
+const PARTY_MAX = 5;
+const party = { slots: [true, true, false], cpu: 1, sel: 5, size: 1 };
+{ const sv = store.get('qlaim.party', {}); if (Array.isArray(sv.slots) && sv.slots.length === 3) party.slots = sv.slots.map(Boolean); if (sv.cpu != null) party.cpu = clamp(sv.cpu | 0, 0, 2); if (sv.size != null) party.size = clamp(sv.size | 0, 1, PARTY_MAX); }
 function humanCount() { return party.slots.filter(Boolean).length; }
-function saveParty() { store.set('qlaim.party', { slots: party.slots, cpu: party.cpu }); }
+function saveParty() { store.set('qlaim.party', { slots: party.slots, cpu: party.cpu, size: party.size }); }
 const CPU_LV = ['よわい', 'ふつう', 'つよい'];
 const codesDown = new Set();                         // いま押されているキー(e.code)
 if (typeof window !== 'undefined' && window.addEventListener) {
@@ -4320,24 +4370,27 @@ function drawLobby(t) {
     ctx.fillStyle = '#10121e'; ctx.font = "bold 16px 'Courier New', monospace";
     ctx.fillText(human ? '人間' : 'CPU', W - 165, y + 4);
   }
-  // CPUの強さ
-  const ys = 520, sel3 = party.sel === 3;
-  lobbyRects.push({ x: 100, y: ys - 24, w: W - 200, h: 40, act: 'cpu' });
-  ctx.fillStyle = sel3 ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(100, ys - 24, W - 200, 40);
-  if (sel3) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(101, ys - 23, W - 202, 38); }
-  ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 16px 'Courier New', monospace";
-  ctx.fillText('CPUの強さ  ◀ ' + CPU_LV[party.cpu] + ' ▶', W / 2, ys + 2);
+  // 1チームの人数・CPUの強さ
+  const row = (ys, sel, act, txt) => {
+    lobbyRects.push({ x: 100, y: ys - 22, w: W - 200, h: 38, act });
+    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(100, ys - 22, W - 200, 38);
+    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(101, ys - 21, W - 202, 36); }
+    ctx.fillStyle = '#cdd8ff'; ctx.font = "bold 16px 'Courier New', monospace"; ctx.fillText(txt, W / 2, ys + 3);
+  };
+  row(508, party.sel === 3, 'size', '1チームの人数  ◀ ' + party.size + '人 ▶  (ぜんぶで' + party.size * 3 + '人)');
+  row(552, party.sel === 4, 'cpu', 'CPUの強さ  ◀ ' + CPU_LV[party.cpu] + ' ▶');
   // スタート
-  const yb = 600, sel4 = party.sel === 4;
+  const yb = 614, sel4 = party.sel === 5;
   lobbyRects.push({ x: W / 2 - 130, y: yb - 30, w: 260, h: 50, act: 'start' });
   ctx.fillStyle = sel4 ? '#ffd76b' : '#8a7a3a'; ctx.fillRect(W / 2 - 130, yb - 30, 260, 50);
   ctx.fillStyle = '#10121e'; ctx.font = "bold 22px 'Courier New', monospace";
   ctx.fillText('スタート', W / 2, yb + 3);
   ctx.fillStyle = '#9dffea'; ctx.font = "bold 12px 'Courier New', monospace";
-  ctx.fillText('ゲームパッドはつないだ順に P1・P2・P3 / X でもどる', W / 2, 676);
+  ctx.fillText('ゲームパッドはつないだ順に P1・P2・P3 / X でもどる', W / 2, 682);
 }
 function lobbyDo(act, i, dir) {
   if (act === 'slot') { party.slots[i] = !party.slots[i]; Snd.blip(); }
+  else if (act === 'size') { party.size = ((party.size - 1 + (dir || 1) + PARTY_MAX) % PARTY_MAX) + 1; Snd.blip(); }
   else if (act === 'cpu') { party.cpu = (party.cpu + (dir || 1) + 3) % 3; Snd.blip(); }
   else if (act === 'start') { saveParty(); startGame(); return; }
   saveParty();
@@ -4345,18 +4398,17 @@ function lobbyDo(act, i, dir) {
 function lobbyKey(k, rep) {
   if (rep || stTimer < 0.25) return;              // 押しっぱなし(キーリピート)ではスタートしない
   const d = KEYDIR[k];
-  if (d === 'up') { party.sel = (party.sel + 4) % 5; Snd.blip(); }
-  else if (d === 'down') { party.sel = (party.sel + 1) % 5; Snd.blip(); }
-  else if (d === 'left' || d === 'right') { if (party.sel < 3) lobbyDo('slot', party.sel); else if (party.sel === 3) lobbyDo('cpu', 0, d === 'left' ? -1 : 1); }
-  else if (k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') {
-    if (party.sel < 3) lobbyDo('slot', party.sel); else if (party.sel === 3) lobbyDo('cpu'); else lobbyDo('start');
-  }
+  const act = party.sel < 3 ? 'slot' : party.sel === 3 ? 'size' : party.sel === 4 ? 'cpu' : 'start';
+  if (d === 'up') { party.sel = (party.sel + 5) % 6; Snd.blip(); }
+  else if (d === 'down') { party.sel = (party.sel + 1) % 6; Snd.blip(); }
+  else if (d === 'left' || d === 'right') { if (act !== 'start') lobbyDo(act, party.sel, d === 'left' ? -1 : 1); }
+  else if (k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') lobbyDo(act, party.sel, 1);
   else if (k === 'x' || k === 'X' || k === 'Escape') { setState('title'); Snd.select(); }
 }
 function lobbyTap(p) {
   const r = lobbyRects.find(q => inRect(p, q));
   if (!r) return;
-  if (r.act === 'slot') party.sel = r.i; else if (r.act === 'cpu') party.sel = 3; else party.sel = 4;
+  party.sel = r.act === 'slot' ? r.i : r.act === 'size' ? 3 : r.act === 'cpu' ? 4 : 5;
   lobbyDo(r.act, r.i, 1);
 }
 // 試合終了: 陣地の広さで順位
@@ -4365,10 +4417,10 @@ function partyEnd() {
   if (state !== 'play') return;
   Snd.voiceStopAll();
   for (const r of rivals) { for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN; r.drawing = false; r.trail = []; r.pts = []; }
-  partyRank = rivals.slice().sort((a, b) => b.area - a.area);
+  partyRank = [0, 1, 2].map(t => ({ team: t, area: teamArea(t), members: rivals.filter(r => r.team === t) })).sort((a, b) => b.area - a.area);
   Snd.stopDraw(); Bgm.stop();
   const top = partyRank[0];
-  if (top && top.human) Snd.clear_(0); else Snd.over();
+  if (top && top.members.some(r => r.human)) Snd.clear_(0); else Snd.over();
   sealRemaining();
   setState('partyres');
 }
@@ -4377,13 +4429,14 @@ function drawPartyRes(t) {
   panel(90, 250, W - 180, 360);
   ctx.textAlign = 'center';
   const top = partyRank[0];
-  ctx.fillStyle = top ? INK_COLORS[top.col] : '#ffffff'; ctx.font = "bold 30px 'Courier New', monospace";
-  ctx.fillText(top ? TEAM_NAMES[top.id] + 'チームの勝ち!' : '引き分け', W / 2, 304);
+  ctx.fillStyle = top ? INK_COLORS[TEAM_COLS[top.team]] : '#ffffff'; ctx.font = "bold 30px 'Courier New', monospace";
+  ctx.fillText(top ? TEAM_NAMES[top.team] + 'チームの勝ち!' : '引き分け', W / 2, 304);
   partyRank.forEach((r, i) => {
     const y = 358 + i * 52, pct = (r.area / initOpen * 100).toFixed(1);
-    ctx.fillStyle = INK_COLORS[r.col]; ctx.fillRect(140, y - 26, (W - 280) * r.area / Math.max(1, partyRank[0].area), 34);
+    ctx.fillStyle = INK_COLORS[TEAM_COLS[r.team]]; ctx.fillRect(140, y - 26, (W - 280) * r.area / Math.max(1, partyRank[0].area), 34);
     ctx.fillStyle = '#10121e'; ctx.font = "bold 18px 'Courier New', monospace"; ctx.textAlign = 'left';
-    ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.id] + ' ' + r.name, 150, y - 2);
+    const who = r.members.filter(q => q.human).map(q => q.name).join('・') || 'CPU';
+    ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.team] + ' ' + who, 150, y - 2);
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff';
     ctx.fillText(pct + '%', W - 150, y - 2);
     ctx.textAlign = 'center';
@@ -4396,14 +4449,15 @@ function drawPartyHud() {
   ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
   ctx.fillStyle = '#2a3150'; ctx.fillRect(x, y, w, h);
   let cx = x;
-  for (const r of rivals) { const a = r.area / initOpen * w; ctx.fillStyle = INK_COLORS[r.col]; ctx.fillRect(cx, y, a, h); cx += a; }
+  for (let t = 0; t < 3; t++) { const a = teamArea(t) / initOpen * w; ctx.fillStyle = INK_COLORS[TEAM_COLS[t]]; ctx.fillRect(cx, y, a, h); cx += a; }
   const na = neutralArea() / initOpen * w; ctx.fillStyle = '#8a8fa8'; ctx.fillRect(cx, y, na, h);
   ctx.font = "bold 11px 'Courier New', monospace";
-  rivals.forEach((r, i) => {
-    ctx.textAlign = i === 0 ? 'left' : i === 1 ? 'center' : 'right';
-    ctx.fillStyle = INK_COLORS[r.col];
-    ctx.fillText(r.name + ' ' + (r.area / initOpen * 100).toFixed(1) + '%', i === 0 ? x : i === 1 ? W / 2 : x + w, y + h + 14);
-  });
+  for (let t = 0; t < 3; t++) {
+    ctx.textAlign = t === 0 ? 'left' : t === 1 ? 'center' : 'right';
+    ctx.fillStyle = INK_COLORS[TEAM_COLS[t]];
+    const who = rivals.filter(r => r.team === t && r.human).map(r => r.name).join('・') || 'CPU';
+    ctx.fillText(TEAM_NAMES[t] + '(' + who + ') ' + (teamArea(t) / initOpen * 100).toFixed(1) + '%', t === 0 ? x : t === 1 ? W / 2 : x + w, y + h + 14);
+  }
   const tm = Math.ceil(vsT);
   ctx.textAlign = 'center'; ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
   ctx.fillText(Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0'), W / 2, y - 8);
@@ -4429,7 +4483,8 @@ function makeRival(i) {
            col: RIVAL_COLS[i % RIVAL_COLS.length], name: RIVAL_NAMES[i % RIVAL_NAMES.length] };
 }
 // 外周を1周する順のマス(下の真ん中から時計回り)を3等分した場所 = 3人のスタート地点(どこからでも公平)
-function perimeterThirds() {
+function perimeterThirds() { return perimeterSplit(3); }
+function perimeterSplit(n) {
   const ring = [], cx = GW >> 1, B = GH - 1, R = GW - 1;
   for (let x = cx; x >= 0; x--) ring.push(idx(x, B));
   for (let y = B - 1; y >= 0; y--) ring.push(idx(0, y));
@@ -4437,18 +4492,18 @@ function perimeterThirds() {
   for (let y = 1; y <= B; y++) ring.push(idx(R, y));
   for (let x = R - 1; x > cx; x--) ring.push(idx(x, B));
   const L = ring.length;
-  return [0, 1, 2].map(k => ring[Math.round(k * L / 3) % L]);
+  return Array.from({ length: n }, (_, k) => ring[Math.round(k * L / n) % L]);
 }
 function setupRivals(lv) {
   ownA = new Uint8Array(surf.N); neutralAt = new Float32Array(surf.N).fill(-99);
   Snd.voiceStopAll();
   rivals = [];
   if (isParty() && !surf.is3D) {
-    const homes = perimeterThirds();
-    for (let t = 0; t < 3; t++) {
-      const r = makeRival(t);
-      r.home = r.c = homes[t]; r.col = TEAM_COLS[t]; r.team = t;
-      r.human = party.slots[t] ? lobbyPNo(t) : 0;
+    const n = 3 * party.size, homes = perimeterSplit(n);
+    for (let k = 0; k < n; k++) {
+      const t = k % 3, m = (k / 3) | 0, r = makeRival(k);
+      r.home = r.c = homes[k]; r.col = TEAM_COLS[t]; r.team = t; r.member = m;
+      r.human = m === 0 && party.slots[t] ? lobbyPNo(t) : 0;
       r.name = r.human ? 'P' + r.human : 'CPU';
       syncPos(r); rivals.push(r);
     }
@@ -4464,10 +4519,11 @@ function setupRivals(lv) {
 }
 function rivalSay(r, kind) { r.sayTxt = pick(RIVAL_LINES[kind]); r.sayT = 1.8; }
 function rivalAreaSum() { return rivals.reduce((a, r) => a + r.area, 0); }
-let ownCount = new Int32Array(16);
+function teamArea(t) { return rivals.reduce((a, r) => a + (r.team === t ? r.area : 0), 0); }
+let ownCount = new Int32Array(256);
 // 持ち主ごとの陣地のマス数を数え直す(最初からある壁は数えない)
 function recountAreas() {
-  ownCount = new Int32Array(16);
+  ownCount = new Int32Array(256);
   for (let i = 0; i < ownA.length; i++) if (grid[i] === WALL && !baseA[i]) ownCount[ownA[i]]++;
   for (const r of rivals) r.area = ownCount[2 + r.id];
 }
@@ -4482,8 +4538,9 @@ function rivalSkill() {
 
 function rivalStep(r, n) {
   if (n < 0) return false;
-  if (grid[n] === RTRAIL && !r.trail.includes(n)) {          // ほかのファイターの線を切る
+  if (grid[n] === RTRAIL && !r.trail.includes(n)) {          // ほかのチームの線を切る(味方の線には入れない)
     const q = rivals.find(o => o !== r && o.trail.includes(n));
+    if (q && q.team === r.team) return false;
     if (q) { rivalFail(q, 'cut', r); if (r.sayT <= 0 && !r.human) rivalSay(r, 'cut'); }
   }
   const v = grid[n];
@@ -4555,7 +4612,8 @@ function snapActor(a) {
 // CPU がやられた: 線は消えて、少しあとに自分の場所から戻ってくる
 function rivalFail(r, why, by) {
   if (r.dead > 0) return;
-  const p = r.drawing ? { x: r.fx * CS, y: FIELD_Y + r.fy * CS } : surf.screenOf(r.c);
+  const p = surf.is3D ? surf.screenOf(r.c) : { x: r.fx * CS, y: FIELD_Y + r.fy * CS };
+  r.soul = { x: p.x, y: p.y, side: Math.random() < 0.5 ? -1 : 1 };     // 魂: やられた場所から昇っていく
   for (const c of r.trail) if (grid[c] === RTRAIL) grid[c] = OPEN;
   r.drawing = false; r.trail = []; r.pts = []; r.plan = [];
   r.dead = CONFIG.RIVAL_RESPAWN;
@@ -4586,7 +4644,7 @@ function planRival(r) {
     let best = null, bd = 1e9;
     for (let k = 0; k < 160; k++) {
       const c = (Math.random() * surf.N) | 0, o = ownA[c];
-      if (grid[c] !== WALL || baseA[c] || o === 2 + r.id || (o < 1)) continue;
+      if (grid[c] !== WALL || baseA[c] || o < 1 || ownerTeam(o) === r.team) continue;
       const x = (c % GW) + 0.5, y = ((c / GW) | 0) + 0.5, d = Math.hypot(x - r.fx, y - r.fy);
       if (d < bd) { bd = d; best = [x, y]; }
     }
@@ -4597,7 +4655,7 @@ function planRival(r) {
   // 自機が線を引いていたら、近ければ切りにいく
   const targets = [];
   if (player.drawing && trail.length > 4) targets.push(trail);
-  for (const o of rivals) if (o !== r && o.drawing && o.trail.length > 4) targets.push(o.trail);
+  for (const o of rivals) if (o !== r && o.team !== r.team && o.drawing && o.trail.length > 4) targets.push(o.trail);
   if (targets.length && Math.random() < 0.25 + sk * 0.5) {
     let best = null, bd = 1e9;
     for (const tr of targets) for (let i = 0; i < tr.length; i += 2) {
@@ -4943,8 +5001,9 @@ function death(why) {
   shakeT = 0.35;
   Snd.stopDraw();
   Snd.death();
-  const p = surf.screenOf(player.c);
+  const p = playerScreen ? playerScreen() : surf.screenOf(player.c);
   spawnParticles(p.x, p.y, 30, '#ff5c8a');
+  souls.push({ x: p.x, y: p.y, col: isVS() ? TEAM_SHADES[0][0] : clawdCol(), t: 0 });   // 魂が昇る
   // 何でミスしたかを出す(いきなりのミスでも原因がわかるように)
   if (why) floats.push({ x: W / 2, y: FIELD_Y + 150, txt: 'ミス: ' + why, t: 2.2, col: '#ff8fa8', big: true });
 }
@@ -5254,7 +5313,7 @@ function closeOptions() {
 }
 
 function onAction() {
-  if (state === 'title') { if (isParty()) { party.sel = 4; setState('lobby'); Snd.select(); } else startGame(); }
+  if (state === 'title') { if (isParty()) { party.sel = 5; setState('lobby'); Snd.select(); } else startGame(); }
   else if (state === 'lobby') { if (stTimer > 0.25) lobbyDo('start'); }
   else if (state === 'partyres' && stTimer > 0.8) nextParty();
   else if (state === 'clear' && stTimer > 0.8) { if (!artSaved) captureArt(); nextLevel(); }
@@ -5838,6 +5897,7 @@ function render() {
   drawSeekers();
   drawBuddies();
   if (rivals.length && !surf.is3D) drawRivals(t);
+  if (rivals.length || souls.length) drawSouls();
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
   if (isParty() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause' || state === 'partyres')) drawPartyHud();
   if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state)) drawBackView(t);
