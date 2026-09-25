@@ -1752,12 +1752,13 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   stTimer = 1;
   vsSel = 0; vsSetKey('ArrowRight'); assert('準備画面: ステージを変える', settings.stageSel === 'RANDOM');
   vsSetKey('ArrowLeft');
-  vsSel = 1; vsSetKey('ArrowRight'); assert('準備画面: ルールを残機制に', settings.vsRule === 'STOCK');
-  vsSel = 2; vsSetKey('ArrowRight'); assert('残機制なら残機の数を変える', settings.vsStock === 4);
-  vsSel = 3; vsSetKey('ArrowRight'); assert('CPUの数', settings.vsCpu === '1');
-  vsSel = 3; for (let i = 0; i < 3; i++) vsSetKey('ArrowRight');   // 1 → 4人
+  const vi = k2 => VSSET_ITEMS.findIndex(it => it.k === k2);
+  vsSel = vi('vsRule'); vsSetKey('ArrowRight'); assert('準備画面: ルールを残機制に', settings.vsRule === 'STOCK');
+  vsSel = vi('_amount'); vsSetKey('ArrowRight'); assert('残機制なら残機の数を変える', settings.vsStock === 4);
+  vsSel = vi('vsCpu'); vsSetKey('ArrowRight'); assert('CPUの数', settings.vsCpu === '1');
+  vsSel = vi('vsCpu'); for (let i = 0; i < 3; i++) vsSetKey('ArrowRight');   // 1 → 4人
   let err = null; try { render(); } catch (e) { err = e.stack; } assert('準備画面の描画', !err, err);
-  vsSel = 5; vsSetKey('z');
+  vsSel = VSSET_ITEMS.length - 1; vsSetKey('z');
   assert('スタートで残機制の試合(時間なし・CPU4人・みんな残機4)', state === 'ready' && isStock() && rivals.length === 4 && rivals.every(r => r.stock === 4) && lives === 3);
   setState('play'); sparxes = [];
   // CPUを全員脱落させると勝ち
@@ -1773,6 +1774,34 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   // 時間制では時間が進む・残機制では進まない
   const t0 = vsT; update(1 / 60); assert('残機制は時間で終わらない', vsT === t0);
   settings.vsRule = 'TIME'; settings.vsStock = 3; settings.vsCpu = 'AUTO'; settings.stageSel = 'TOUR';
+}
+
+
+// ---- 103) ステージの広さ ----
+{
+  settings.mode = 'VS'; settings.vsRule = 'TIME'; settings.stageSel = 'PLANE';
+  const Wbefore = W;
+  for (const [sz, gw] of [['S', 100], ['M', 128], ['L', 160], ['XL', 200]]) {
+    settings.stageSize = sz; startGame();
+    assert('広さ ' + sz + ': 平面は ' + gw + ' マス幅・画面の大きさは同じ', GW === gw && Math.abs(GW * CS - Wbefore) < 0.5 && surf.N === GW * GH && fieldC.width === Math.round(GW * CS));
+  }
+  settings.stageSize = 'XL'; settings.vsCpu = '7'; startGame(); setState('play');
+  let err = null; try { for (let i = 0; i < 60 * 15 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); redrawField(); } catch (e) { err = e.stack; }
+  assert('特大の平面でCPU7人の試合が進む', !err && rivals.length === 7 && rivals.every(r => r.home >= 0 && r.home < surf.N), err);
+  // 立体も広くなる
+  settings.stageSel = 'CUBE'; settings.stageSize = 'M'; startGame(); const n1 = surf.N;
+  settings.stageSize = 'XL'; startGame(); const n2 = surf.N;
+  assert('立体も広さでマスが増える(立方体)', n2 > n1 * 1.8, n1 + '→' + n2);
+  settings.stageSel = 'KLEIN'; startGame(); setState('play');
+  err = null; try { for (let i = 0; i < 60 * 8 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); } render(); } catch (e) { err = e.stack; }
+  assert('特大のクラインの壺(裏返りのつなぎも広さに合わせる)', !err, err);
+  // AUTO は人数で
+  settings.stageSize = 'AUTO'; settings.vsCpu = '3'; assert('AUTO: 4人なら中', stageSizeFor(1) === 'M');
+  settings.vsCpu = '6'; assert('AUTO: 7人なら大', stageSizeFor(1) === 'L');
+  settings.vsCpu = '7'; assert('AUTO: 8人なら特大', stageSizeFor(1) === 'XL');
+  settings.mode = 'TOUR'; assert('ひとりのモードはいつも中', stageSizeFor(1) === 'M');
+  settings.mode = 'VS'; settings.vsCpu = 'AUTO'; settings.stageSel = 'TOUR'; settings.stageSize = 'AUTO';
+  startGame();
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');

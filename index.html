@@ -648,9 +648,31 @@ const BGMDATA = {
 };
 
 /* ---------------- 定数・ユーティリティ ---------------- */
-const GW = CONFIG.GRID_W, GH = CONFIG.GRID_H, CS = CONFIG.CELL;
+// GW・GH・CS はステージの広さで変わる(applyStageSize)。画面の大きさ W・H はいつも同じ
+let GW = CONFIG.GRID_W, GH = CONFIG.GRID_H, CS = CONFIG.CELL;
 const FIELD_Y = CONFIG.HUD_H;
 const W = GW * CS, H = FIELD_Y + GH * CS;
+/* ---- ステージの広さ(対戦モード) ----
+   平面: マスを細かくして、同じ画面にたくさんのマスを入れる(みんなマス単位で動くので、そのぶん広く感じる)。
+   立体: 面のマスの数を増やす。AUTO は人数で決める(4人まで 中 / 7人まで 大 / それより多いと 特大) */
+const STAGE_SIZES = {
+  S:  { cs: 6.4, n: 0.8,  label: '小' },
+  M:  { cs: 5,   n: 1,    label: '中' },
+  L:  { cs: 4,   n: 1.25, label: '大' },
+  XL: { cs: 3.2, n: 1.5,  label: '特大' },
+};
+let stageScale = 'M';
+function stageSizeLabel(k) { return k === 'AUTO' ? 'AUTO' : (STAGE_SIZES[k] || STAGE_SIZES.M).label; }
+function applyStageSize(k) {
+  if (!STAGE_SIZES[k]) k = 'M';
+  if (k === stageScale) return false;
+  stageScale = k;
+  CS = STAGE_SIZES[k].cs; GW = Math.round(W / CS); GH = Math.round((H - FIELD_Y) / CS);
+  if (typeof fieldC !== 'undefined') { fieldC.width = Math.round(GW * CS); fieldC.height = Math.round(GH * CS); }
+  return true;
+}
+// 見た目の大きさ(マスが細かいときは、キャラも少し小さく)
+function sprK() { return clamp(CS / 5, 0.7, 1.15); }
 const OPEN = 0, WALL = 1, TRAIL = 2, RTRAIL = 3;   // RTRAIL: CPU(ライバル)の描きかけの線
 const HOME_COL = 9;              // colA: 初期陣地(HOME)の色番号
 const DIRS4 = [[0,-1],[1,0],[0,1],[-1,0]];
@@ -713,7 +735,7 @@ const store = (() => {
 
 const settings = Object.assign(
   { bgm: 6, sfx: 7, diff: 'NORMAL', lives: CONFIG.LIVES, theme: THEMES.length, crt: true, mode: 'VS', music: 'AUTO', shake: true, glow: true, ink: 'MIX', claimSnd: 'MIX',
-    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3 },
+    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3, stageSize: 'AUTO' },
   store.get('qlaim.settings', {})
 );
 if (!DIFFS[settings.diff]) settings.diff = 'NORMAL';
@@ -1707,8 +1729,9 @@ function cubeFaceUV(x, y, z) {
   return y > 0 ? [4, x / ay, -z / ay] : [5, x / ay, z / ay];
 }
 
-function makeRadialSurface(key) {
-  const def = CONFIG.SURF[key];
+function makeRadialSurface(key, sc) {
+  const def = Object.assign({}, CONFIG.SURF[key]);
+  def.n = Math.max(8, Math.round(def.n * (sc || 1)));
   const gno = def.shape === 'cube';     // 立方体だけは面ごとに等間隔、ほかは等角(セルの大きさが揃う)
   const pieces = def.shape === 'sphere' ? null : SHAPES[def.shape]();
   const n = def.n, nn = n * n, N = 6 * nn, VN = n + 1, nv = 6 * VN * VN;
@@ -1868,10 +1891,12 @@ const PARAM_SHAPES = {
   klein: { NU: 120, NV: 44, flip: true, flipOff: 22, uMax: Math.PI, f: kleinBottle, camSquash: 0.35 },
 };
 
-function makeParamSurface(key) {
+function makeParamSurface(key, sc) {
   const def = CONFIG.SURF[key], PS = PARAM_SHAPES[def.shape];
-  const NU = PS.NU, NV = PS.NV, N = NU * NV, flip = PS.flip, nv = (NU + 1) * (NV + 1);
-  const FO = PS.flipOff, border = !!PS.border, VR = PS.vRange || [0, Math.PI * 2];
+  sc = sc || 1;
+  // 広さに合わせてマスを増やす(裏返りのつなぎ flipOff も同じ割合で。偶数にそろえる)
+  const NU = 2 * Math.round(PS.NU * sc / 2), NV = 2 * Math.round(PS.NV * sc / 2), N = NU * NV, flip = PS.flip, nv = (NU + 1) * (NV + 1);
+  const FO = PS.flipOff ? Math.round(PS.flipOff * NV / PS.NV) : PS.flipOff, border = !!PS.border, VR = PS.vRange || [0, Math.PI * 2];
   const raw0 = (x, y) => PS.f(x / NU * PS.uMax, VR[0] + y / NV * (VR[1] - VR[0]));
   // 中心を原点に、いちばん遠い点が半径1になるようにそろえる
   const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -1988,12 +2013,21 @@ function makeParamSurface(key) {
 
 const SURF_CACHE = {};
 function getSurface(key) {
-  if (!SURF_CACHE[key]) {
+  const ck = key + ':' + stageScale, sc = STAGE_SIZES[stageScale].n;   // 広さごとに作って覚えておく
+  if (!SURF_CACHE[ck]) {
     const sh = CONFIG.SURF[key].shape;
-    SURF_CACHE[key] = key === 'PLANE' ? makePlaneSurface()
-                    : PARAM_SHAPES[sh] ? makeParamSurface(key) : makeRadialSurface(key);
+    SURF_CACHE[ck] = key === 'PLANE' ? makePlaneSurface()
+                   : PARAM_SHAPES[sh] ? makeParamSurface(key, sc) : makeRadialSurface(key, sc);
   }
-  return SURF_CACHE[key];
+  return SURF_CACHE[ck];
+}
+// このラウンドの広さ: 対戦モードは設定(AUTO は人数で)、それ以外はいつも「中」
+function stageSizeFor(lv) {
+  if (!hasRivals()) return 'M';
+  const k = settings.stageSize || 'AUTO';
+  if (k !== 'AUTO') return k;
+  const n = isVS() ? vsCpuCount(lv) + 1 : 3 * party.size;
+  return n <= 4 ? 'M' : n <= 7 ? 'L' : 'XL';
 }
 function surfaceFor(lv) {
   if (settings.mode === 'DAILY') { const d = dailyList(); return d[(lv - 1) % d.length]; }
@@ -2636,6 +2670,7 @@ function makeQix(k, nq, spd) {
 
 function initLevel(lv) {
   const autoTheme = settings.theme >= THEMES.length;
+  applyStageSize(stageSizeFor(lv));
   surf = getSurface(surfaceFor(lv));
   grid = new Uint8Array(surf.N);
   colA = new Uint8Array(surf.N);
@@ -4624,6 +4659,7 @@ const MATCH_ITEMS = [
   { k:'matchTime', label:'試合時間',      vals:MATCH_TIMES },
   { k:'vsStock',   label:'VSの残機',      vals:[1, 2, 3, 4, 5] },
   { k:'stageSel',  label:'ステージ',      vals:STAGE_OPTS },
+  { k:'stageSize', label:'ステージの広さ', vals:['AUTO', 'S', 'M', 'L', 'XL'] },
   { k:'_keys',     label:'キーコンフィグ' },
   { k:'_back',     label:'もどる' },
 ];
@@ -4639,12 +4675,12 @@ function matchAdjust(dir) {
   Snd.blip(); saveSettings();
 }
 function drawMatchOpts(t) {
-  panel(60, 150, W - 120, 540);
+  panel(60, 150, W - 120, 580);
   ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff'; ctx.font = "bold 26px 'Courier New', monospace";
   ctx.fillText('対戦の設定', W / 2, 200);
   matchRects = [];
   MATCH_ITEMS.forEach((it, i) => {
-    const y = 250 + i * 44, sel = i === matchSel;
+    const y = 246 + i * 42, sel = i === matchSel;
     matchRects.push({ x: 90, y: y - 24, w: W - 180, h: 38, idx: i });
     ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(90, y - 24, W - 180, 38);
     ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#ffffff' : '#aab6dd'; ctx.font = "bold 17px 'Courier New', monospace";
@@ -4655,12 +4691,13 @@ function drawMatchOpts(t) {
     else if (it.k === 'matchTime') v = matchTime() + '秒';
     else if (it.k === 'vsCpu') v = settings.vsCpu === 'AUTO' ? 'AUTO(3〜7)' : settings.vsCpu + '人';
     else if (it.k === 'vsRule') v = settings.vsRule === 'STOCK' ? '残機制' : '時間制';
+    else if (it.k === 'stageSize') v = stageSizeLabel(settings.stageSize || 'AUTO');
     else if (it.k === 'vsStock') v = vsStock() + '機';
     else if (it.vals) v = String(settings[it.k]);
     if (v) ctx.fillText('◀ ' + v + ' ▶', W - 110, y + 2);
   });
   ctx.textAlign = 'center'; ctx.fillStyle = '#6d7ba8'; ctx.font = "bold 13px 'Courier New', monospace";
-  ctx.fillText('↑↓ えらぶ / ←→ かえる / X もどる', W / 2, 668);
+  ctx.fillText('↑↓ えらぶ / ←→ かえる / X もどる', W / 2, 712);
 }
 // キーコンフィグ: P1〜P3 の ↑↓←→ と「速く」。えらんで Z を押してから、使いたいキーを押す
 const KEY_ACTS = [['u', '↑'], ['d', '↓'], ['l', '←'], ['r', '→'], ['f', '速く']];
@@ -4721,19 +4758,21 @@ function p1Dir(code) {
    タイトルで VS を選んで決定すると、まずこの画面。ステージ・ルール・時間か残機・CPUの数・強さを選んでスタート */
 const VSSET_ITEMS = [
   { k:'stageSel', label:'ステージ' },
+  { k:'stageSize', label:'広さ' },
   { k:'vsRule',   label:'ルール' },
   { k:'_amount',  label:'' },                        // 時間制なら試合時間、残機制なら残機の数
   { k:'vsCpu',    label:'CPUの数' },
   { k:'cpuLv',    label:'CPUの強さ' },
   { k:'_start',   label:'スタート' },
 ];
-let vsSel = 5, vsRects = [];
+let vsSel = 6, vsRects = [];
 function vsSetDo(i, dir) {
   const it = VSSET_ITEMS[i];
   if (it.k === '_start') { saveSettings(); startGame(); return; }
   const cyc = (k, vals) => { let j = vals.findIndex(v => String(v) === String(settings[k])); if (j < 0) j = 0; settings[k] = vals[(j + dir + vals.length) % vals.length]; };
   if (it.k === 'stageSel') cyc('stageSel', STAGE_OPTS);
   else if (it.k === 'vsRule') cyc('vsRule', ['TIME', 'STOCK']);
+  else if (it.k === 'stageSize') cyc('stageSize', ['AUTO', 'S', 'M', 'L', 'XL']);
   else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') cyc('vsStock', [1, 2, 3, 4, 5]); else cyc('matchTime', MATCH_TIMES); }
   else if (it.k === 'vsCpu') cyc('vsCpu', ['AUTO', '1', '2', '3', '4', '5', '6', '7']);
   else if (it.k === 'cpuLv') cyc('cpuLv', ['AUTO'].concat(CPU_LV));
@@ -4747,7 +4786,7 @@ function drawVsSetup(t) {
   ctx.fillText('全員敵同士。いちばん広い陣地を取れ!', W / 2, 190);
   vsRects = [];
   VSSET_ITEMS.forEach((it, i) => {
-    const y = 250 + i * 70, sel = i === vsSel;
+    const y = 240 + i * 64, sel = i === vsSel;
     if (it.k === '_start') {
       vsRects.push({ x: W / 2 - 130, y: y - 30, w: 260, h: 52, i });
       ctx.fillStyle = sel ? '#ffd76b' : '#8a7a3a'; ctx.fillRect(W / 2 - 130, y - 30, 260, 52);
@@ -4760,6 +4799,7 @@ function drawVsSetup(t) {
     if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 29, W - 162, 54); }
     let label = it.label, v = '', sub = '';
     if (it.k === 'stageSel') { v = stageLabel(settings.stageSel); sub = settings.stageSel === 'TOUR' ? '平面 → 立方体 → 球 … とラウンドごとに進む' : settings.stageSel === 'RANDOM' ? 'ラウンドごとにランダム' : (CONFIG.SURF[settings.stageSel] || {}).sub || ''; }
+    else if (it.k === 'stageSize') { const k2 = settings.stageSize || 'AUTO'; v = stageSizeLabel(k2); sub = k2 === 'AUTO' ? '人数が多いほど広く(いまの人数なら ' + STAGE_SIZES[(() => { const n = vsCpuCount(1) + 1; return n <= 4 ? 'M' : n <= 7 ? 'L' : 'XL'; })()].label + ')' : 'CPUが多いときは広いほうがすっきり'; }
     else if (it.k === 'vsRule') { v = settings.vsRule === 'STOCK' ? '残機制' : '時間制'; sub = settings.vsRule === 'STOCK' ? '時間なし。残機がなくなると脱落。最後まで残れ!' : '時間切れのとき、いちばん広い人の勝ち'; }
     else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') { label = '残機'; v = vsStock() + '機'; sub = 'CPUも同じ数'; } else { label = '試合時間'; v = matchTime() + '秒'; } }
     else if (it.k === 'vsCpu') { v = settings.vsCpu === 'AUTO' ? 'AUTO' : settings.vsCpu + '人'; sub = settings.vsCpu === 'AUTO' ? '3人から、2ラウンドごとに1人ずつ増える(7人まで)' : ''; }
@@ -4938,7 +4978,7 @@ function drawLobby(t) {
   row(508, party.sel === 3, 'size', '1チームの人数  ◀ ' + party.size + '人 ▶  (ぜんぶで' + party.size * 3 + '人)');
   row(552, party.sel === 4, 'cpu', 'CPUの強さ  ◀ ' + CPU_LV[party.cpu] + ' ▶');
   ctx.fillStyle = '#9dffea'; ctx.font = "bold 12px 'Courier New', monospace";
-  ctx.fillText('ステージ: ' + stageLabel(settings.stageSel) + ' / 時間: ' + matchTime() + '秒  (O で対戦の設定)', W / 2, 586);
+  ctx.fillText('ステージ: ' + stageLabel(settings.stageSel) + ' / 広さ: ' + stageSizeLabel(settings.stageSize || 'AUTO') + ' / 時間: ' + matchTime() + '秒  (O で変更)', W / 2, 586);
   // スタート
   const yb = 626, sel4 = party.sel === 5;
   lobbyRects.push({ x: W / 2 - 130, y: yb - 30, w: 260, h: 50, act: 'start' });
@@ -5537,7 +5577,7 @@ function drawRivals(t) {
       continue;
     }
     syncPos(r);
-    const x = r.fx * CS, y = FIELD_Y + r.fy * CS, s = 2;
+    const x = r.fx * CS, y = FIELD_Y + r.fy * CS, s = 2 * sprK();
     if (r.inv > 0) {                                 // 戻ってきた直後: 半透明にせず、チームの色の輪が広がる
       const k = 1 - r.inv / 1.5;
       for (const d of [0, 0.5]) { const kk = (k + d) % 1; ctx.globalAlpha = 1 - kk; ctx.strokeStyle = teamHex(r.team); ctx.lineWidth = 3;
@@ -6032,8 +6072,8 @@ function closeOptions() {
 }
 
 function onAction() {
-  if (state === 'title') { if (isParty()) { party.sel = 5; setState('lobby'); Snd.select(); } else if (isVS()) { vsSel = 5; setState('vssetup'); Snd.select(); } else startGame(); }
-  else if (state === 'vssetup') { if (stTimer > 0.25) vsSetDo(5, 1); }
+  if (state === 'title') { if (isParty()) { party.sel = 5; setState('lobby'); Snd.select(); } else if (isVS()) { vsSel = VSSET_ITEMS.length - 1; setState('vssetup'); Snd.select(); } else startGame(); }
+  else if (state === 'vssetup') { if (stTimer > 0.25) vsSetDo(VSSET_ITEMS.length - 1, 1); }
   else if (state === 'lobby') { if (stTimer > 0.25) lobbyDo('start'); }
   else if (state === 'partyres' && stTimer > 1.4) nextParty();
   else if (state === 'clear' && stTimer > 0.8) { if (!artSaved) captureArt(); nextLevel(); }
@@ -6389,7 +6429,7 @@ function drawRoller(p, s, t) {
 }
 function drawPlayer(t) {
   if (isParty() && state !== 'title') return;          // PARTY はファイターだけ
-  const p = playerScreen(), s = 2;
+  const p = playerScreen(), s = 2 * (surf.is3D ? 1 : sprK());
   if (deathTimer > 0) { // くるくる回って小さくなる
     ctx.save();
     ctx.globalAlpha = clamp(deathTimer / 1.2, 0, 1);
@@ -6776,7 +6816,7 @@ function drawNumerin(q, faint) {
     }
   }
   // 体: 半透明のかさ + ふち
-  const R = surf.is3D ? 13 : 12, pul = Math.sin(blinkT * 2.5 + q.arm) * 1.2;
+  const R = surf.is3D ? 13 : 12 * sprK(), pul = Math.sin(blinkT * 2.5 + q.arm) * 1.2;
   // かさの下にゆれる短い足(3本)
   ctx.strokeStyle = col; ctx.lineWidth = 2.2;
   for (let k = -1; k <= 1; k++) {

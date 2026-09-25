@@ -37,6 +37,9 @@
 - 成績: `r.kills` / `r.downs`、自機は `vsStat`。rivalFail(r, why, by) の by に加算(by なしで VS の cut/trap は自機の手柄)
 - 描く音(voice): 低めの音域・4段まで・ローパス。死亡時と試合の外(tickMeta)で止める
 - CPU の強さは5段階 `CPU_LV` / `CPU_SKILL`(0.3〜1.6)。1 をこえると: 取りにいく大きさは「つよい」まで、ヌメリンから大きく離れる、いつも速く描く、迷わない(`thinkTime`)、自機の線をすぐ切りにくる
+- ステージの広さ `settings.stageSize`(AUTO / S / M / L / XL)。`applyStageSize` が平面のマスの大きさ CS(6.4 / 5 / 4 / 3.2)と GW・GH を変える(画面 W・H は同じ)。
+  立体は `STAGE_SIZES[k].n` 倍のマス(曲面は NU・NV・flipOff を同じ割合で、偶数に)。盤面のキャッシュは「名前:広さ」。AUTO は人数で(4人まで中/7人まで大/それ以上は特大)。
+  ひとり用のモードはいつも中。平面のキャラの大きさは `sprK()`
 - VS の準備画面 state 'vssetup'(`VSSET_ITEMS`、`vsSetDo`、タイトルで VS を決定すると出る)。O で 'matchopts' へ
 - 残機制 `isStock()`(settings.vsRule === 'STOCK'、`vsStock()` 機): CPU は `r.stock`、0 で `r.out`(dead=1e9 で戻らない)。全員脱落は `pendingEnds` で更新の最後に vsEnd。
   自機は lives = 残機-1、applyDeath で lives<0 なら `vsEnd(true)`(負け、ゲームオーバーにしない)。残機制は時間で終わらず、負けたら同じラウンドをやり直し
