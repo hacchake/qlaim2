@@ -2101,10 +2101,11 @@ function updateCamera(dt) {
   // X(held.slow)を押している間は大きく引いて全体を見渡す
   const focusDrawing = isParty() ? (rivals.find(q => q.human === 1) || {}).drawing : player.drawing;
   const wantD = (state === 'play' || state === 'ready') && held.slow ? 5.3 : state === 'play' && focusDrawing ? 3.95
-              : state === 'clear' ? 4.7 : 3.4;   // クリア中は引いて陣地全体を見せる
+              : isResult() ? resZoom : 3.4;   // リザルトは引いて全体を見せる(拡大縮小できる)
   cam.D += (wantD - cam.D) * (1 - Math.exp(-dt * (state === 'ready' ? 3.5 : 2.5)));
   if ((state === 'play' || state === 'ready') && splitHumans().length) updatePaneCams(dt);
   if (state === 'play' || state === 'ready') camFollow(camFocusCell(), dt);
+  else if (isResult()) resultCamera(dt);
   else if (state !== 'pause') camRotate([0.25, 1, 0], dt * 0.35); // タイトル等ではゆっくり回る
 }
 
@@ -2179,7 +2180,44 @@ let particles = [], floats = [];
 // テーマ由来の実行時パレット(applyThemeで再計算)
 let themePal = [], themePalD = [], col3D = [];
 
-function setState(s) { state = s; stTimer = 0; }
+function setState(s) {
+  state = s; stTimer = 0;
+  if (isResult()) { resHide = false; resZoom = 4.7; resIdle = 9; }   // リザルトに入ったら観察の状態をもどす
+}
+/* ---- リザルトで塗った盤面を観察 ----
+   立体: ドラッグ / 矢印キーで回す、ホイール / ピンチで拡大縮小、さわらないとゆっくり自動で回る。
+   V か「観察」ボタンで結果の表を隠して、盤面だけを見る(平面も)。動かさずにタップすると次へ */
+let resHide = false, resZoom = 4.7, resIdle = 9, resDrag = null;
+const resPtrs = new Map();
+let resPinch = 0;
+const viewBtn = { x: 0, y: 0, w: 124, h: 40 };
+function isResult() { return state === 'vsres' || state === 'partyres' || state === 'clear'; }
+function drawViewBtn() {
+  if (stTimer < 1.0) return;
+  viewBtn.x = W - viewBtn.w - 14; viewBtn.y = H - viewBtn.h - 14;
+  ctx.fillStyle = resHide ? 'rgba(255,215,107,0.92)' : 'rgba(20,26,56,0.9)'; ctx.fillRect(viewBtn.x, viewBtn.y, viewBtn.w, viewBtn.h);
+  ctx.strokeStyle = '#ffd76b'; ctx.lineWidth = 2; ctx.strokeRect(viewBtn.x + 1, viewBtn.y + 1, viewBtn.w - 2, viewBtn.h - 2);
+  ctx.fillStyle = resHide ? '#10121e' : '#ffd76b'; ctx.font = "bold 15px 'Courier New', monospace"; ctx.textAlign = 'center';
+  ctx.fillText(resHide ? '結果を見る' : '観察する(V)', viewBtn.x + viewBtn.w / 2, viewBtn.y + 26);
+}
+function drawObserve() {
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, FIELD_Y + 4, W, 30);
+  ctx.fillStyle = '#ffffff'; ctx.font = "bold 13px 'Courier New', monospace";
+  ctx.fillText(surf.is3D ? 'ドラッグ / 矢印で回す・ホイール / ピンチで拡大縮小・V で結果・Z で次へ' : 'V で結果にもどる・Z で次へ', W / 2, FIELD_Y + 24);
+}
+// 観察中のカメラ: 矢印で回す、さわっていなければゆっくり回る
+function resultCamera(dt) {
+  resIdle += dt;
+  const sp = 1.8 * dt;
+  let turned = false;
+  if (held.left)  { camRotate([0, 1, 0], -sp); turned = true; }
+  if (held.right) { camRotate([0, 1, 0], sp); turned = true; }
+  if (held.up)    { camRotate([1, 0, 0], -sp); turned = true; }
+  if (held.down)  { camRotate([1, 0, 0], sp); turned = true; }
+  if (turned) resIdle = 0;
+  if (resIdle > 2.5) camRotate([0.25, 1, 0], dt * 0.35);
+}
 function percent()   { return claimed / initOpen * 100; }
 function target()    { return surf.def.target; }
 
@@ -6661,7 +6699,7 @@ function render() {
 
   ctx.fillStyle = t.field;
   ctx.fillRect(-8, -8, W + 16, H + 16);
-  const splitHs = state !== 'title' ? splitHumans() : [];
+  const splitHs = (state === 'play' || state === 'ready' || state === 'pause') ? splitHumans() : [];
   if (splitHs.length) renderSplit(t, splitHs);
   else if (surf.is3D) { drawAtmosphere(); render3D(t); }
   else render2D(t);
@@ -6671,7 +6709,7 @@ function render() {
   if ((rivals.length || souls.length) && !splitHs.length) drawSouls(false);
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
   if (isParty() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause' || state === 'partyres')) drawPartyHud();
-  if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state) && !splitHs.length) drawBackView(t);
+  if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'ending', 'dex', 'dexcard', 'gallery'].includes(state) && !splitHs.length && !isResult()) drawBackView(t);
   if (state === 'play' || state === 'ready' || state === 'pause') drawStatus();
   if (tutorStep >= 0 && !hasRivals() && (state === 'play' || state === 'ready')) drawTutor(t);   // 対戦モードは上のバーと重なるので出さない
 
@@ -7470,8 +7508,8 @@ function renderOverlay() {
   }
 
   if (state === 'lobby') { drawLobby(t); return; }
-  if (state === 'partyres') { drawPartyRes(t); return; }
-  if (state === 'vsres') { drawVsRes(t); return; }
+  if (state === 'partyres') { if (resHide) drawObserve(); else drawPartyRes(t); drawViewBtn(); return; }
+  if (state === 'vsres') { if (resHide) drawObserve(); else drawVsRes(t); drawViewBtn(); return; }
   if (state === 'vssetup') { drawVsSetup(t); return; }
   if (state === 'matchopts') { drawMatchOpts(t); return; }
   if (state === 'keycfg') { drawKeyCfg(t); return; }
@@ -7490,7 +7528,9 @@ function renderOverlay() {
     if (stTimer > 0.8) ctx.fillText(lives > 0 ? 'Z / タップ でもう一度 (残機 -1)' : 'Z / タップ で おしまい', W / 2, 496);
     return;
   }
+  if (state === 'clear' && resHide) { drawObserve(); drawViewBtn(); return; }
   if (state === 'clear') {
+    drawViewBtn();
     // はじめの1.2秒は結果を出さず、塗り上がった作品を見せる。そのあと結果の板がふわっと出る
     if (stTimer < 1.2) {
       ctx.globalAlpha = Math.min(1, stTimer * 3);
@@ -7667,7 +7707,9 @@ function onKeyDown(e) {
     else if (k === 'x' || k === 'X' || k === 'Escape') { setState(matchFrom); Snd.select(); }
     e.preventDefault(); return;
   }
+  if ((k === 'v' || k === 'V') && isResult() && stTimer > 1.0) { resHide = !resHide; Snd.select(); e.preventDefault(); return; }
   if (state === 'partyres') {
+    if (KEYDIR[k]) { pressDir(KEYDIR[k]); e.preventDefault(); return; }
     if ((k === 'x' || k === 'X' || k === 'Escape') && stTimer > 0.5) backToTitle();
     else if ((k === 'z' || k === 'Z' || k === 'Enter' || k === ' ') && stTimer > 1.4) nextParty();
     e.preventDefault(); return;
@@ -7992,8 +8034,46 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (state === 'over' && inRect(p, shareRect)) { shareResult(); return; }
-  onAction(); // clear / over
+  if (isResult()) {
+    if (stTimer > 1.0 && inRect(p, viewBtn)) { resHide = !resHide; Snd.select(); return; }
+    resPtrs.set(e.pointerId, p);
+    if (resPtrs.size === 2) { const [a, b] = [...resPtrs.values()]; resPinch = Math.hypot(a.x - b.x, a.y - b.y); resDrag = null; return; }
+    resDrag = { x: p.x, y: p.y, moved: false };          // 動かさずに離したら「次へ」、動かしたら回す
+    return;
+  }
+  onAction(); // over
 });
+cv.addEventListener('pointermove', e => {
+  if (!isResult()) return;
+  const p = canvasPos(e);
+  if (resPtrs.has(e.pointerId)) resPtrs.set(e.pointerId, p);
+  if (resPtrs.size === 2) {                           // ピンチで拡大縮小
+    const [a, b] = [...resPtrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (resPinch > 0) resZoom = clamp(resZoom * resPinch / Math.max(20, d), 2.6, 9);
+    resPinch = d; resIdle = 0; return;
+  }
+  if (!resDrag) return;
+  const dx = p.x - resDrag.x, dy = p.y - resDrag.y;
+  if (!resDrag.moved && Math.hypot(dx, dy) < 8) return;
+  resDrag.moved = true; resIdle = 0;
+  if (surf.is3D) { camRotate([0, 1, 0], dx * 0.008); camRotate([1, 0, 0], dy * 0.008); }
+  resDrag.x = p.x; resDrag.y = p.y;
+});
+function endResDrag(e) {
+  if (e && resPtrs.has(e.pointerId)) resPtrs.delete(e.pointerId);
+  if (resPtrs.size < 2) resPinch = 0;
+  if (!resDrag) return;
+  const tap = !resDrag.moved;
+  resDrag = null;
+  if (tap && isResult()) onAction();                  // タップ = 次へ
+}
+window.addEventListener('pointerup', endResDrag);
+window.addEventListener('pointercancel', e => { if (e && resPtrs.has(e.pointerId)) resPtrs.delete(e.pointerId); resDrag = null; });
+cv.addEventListener('wheel', e => {
+  if (!isResult() || !surf.is3D) return;
+  resZoom = clamp(resZoom * (1 + e.deltaY * 0.0012), 2.6, 9); resIdle = 0;
+  if (e.preventDefault) e.preventDefault();
+}, { passive: false });
 
 // 画面をなぞって方向を指示する(指・マウス)。離すと止まる
 let dragStart = null, dragDir = null;

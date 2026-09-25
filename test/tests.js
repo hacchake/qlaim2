@@ -1804,5 +1804,28 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   startGame();
 }
 
+
+// ---- 104) リザルトで立体を観察 ----
+{
+  settings.mode = 'VS'; settings.stageSel = 'CUBE'; startGame(); setState('play');
+  vsEnd();
+  assert('リザルトに入る(観察はオフ)', state === 'vsres' && !resHide && resZoom === 4.7);
+  stTimer = 2;
+  // 矢印で回る
+  const R0 = cam.R.slice(); pressDir('left'); for (let i = 0; i < 10; i++) updateCamera(1 / 60); releaseDir('left');
+  assert('矢印キーで立体が回る', cam.R.some((v, i) => Math.abs(v - R0[i]) > 1e-3));
+  // V で表を隠す
+  onKeyDown({ key: 'v', preventDefault() {} }); assert('V で結果の表を隠す', resHide);
+  let err = null; try { render(); onKeyDown({ key: 'v', preventDefault() {} }); render(); } catch (e) { err = e.stack; }
+  assert('観察中・結果の描画', !err && !resHide, err);
+  // 拡大縮小(カメラの距離が近づく)
+  resZoom = 3; for (let i = 0; i < 120; i++) updateCamera(1 / 60);
+  assert('拡大縮小でカメラが寄る', Math.abs(cam.D - 3) < 0.2, cam.D.toFixed(2));
+  // さわっていなければ、ゆっくり自動で回る
+  resIdle = 9; const R1 = cam.R.slice(); for (let i = 0; i < 30; i++) updateCamera(1 / 60);
+  assert('さわらないと自動で回る', cam.R.some((v, i) => Math.abs(v - R1[i]) > 1e-3));
+  settings.stageSel = 'TOUR';
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);

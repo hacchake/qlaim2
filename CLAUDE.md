@@ -34,6 +34,7 @@
   RTRAIL の持ち主は `rtOwn`。PARTY の途中決着は `matchTarget()` = 90%。対戦モードの球は地図にしない
 - 画面分割(立体の PARTY で人間2〜3人): `splitHumans()`、`paneRects(n)`(上下に等分)、人間ごとのカメラ `paneCams`、`withCam(pc, fn)` で一時的に切り替えて描画・追従・操作の向き
 - 結果: VS は state 'vsres'(`vsResult`、`drawResultTable`)。勝ちは startClear の得点・記録をしてから vsres に。PARTY は 'partyres' に同じ表と MVP。どちらも最初の1秒は「しゅうりょう!」
+- リザルトの観察(`isResult()` = clear / vsres / partyres): `resHide`(V・ボタン `viewBtn`)、`resZoom`(ホイール・ピンチ)、`resultCamera`(矢印で回す・さわらないと自動回転)。タップは pointerup で「動かしていなければ次へ」。リザルトは画面分割しない
 - 成績: `r.kills` / `r.downs`、自機は `vsStat`。rivalFail(r, why, by) の by に加算(by なしで VS の cut/trap は自機の手柄)
 - 描く音(voice): 低めの音域・4段まで・ローパス。死亡時と試合の外(tickMeta)で止める
 - CPU の強さは5段階 `CPU_LV` / `CPU_SKILL`(0.3〜1.6)。1 をこえると: 取りにいく大きさは「つよい」まで、ヌメリンから大きく離れる、いつも速く描く、迷わない(`thinkTime`)、自機の線をすぐ切りにくる
