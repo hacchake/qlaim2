@@ -296,6 +296,8 @@ const MODES = ['VS', 'PARTY', 'TOUR', 'DAILY', 'ZEN'].concat(Object.keys(CONFIG.
 // PARTY(3チーム対戦): 赤・黄・青の3チーム。人間1〜3人(ひとつの画面で)、足りないぶんはCPU
 function isParty() { return settings.mode === 'PARTY'; }
 function hasRivals() { return isVS() || isParty(); }
+// 途中で決着する占領率: PARTY は大勢で塗るので 90%(ほぼ時間いっぱい遊べる)
+function matchTarget() { return isParty() ? 90 : target(); }
 // VS(ナワバリバトル): 自機と同じことができるCPUと、制限時間内に広い陣地を取ったほうが勝ち
 function isVS() { return settings.mode === 'VS'; }
 // ZEN: のんびりお絵かき。ミスなし・SPARX/SEEKERなし・導火線なし・記録なし。盤面はTOURの順
@@ -1993,7 +1995,7 @@ function getSurface(key) {
 }
 function surfaceFor(lv) {
   if (settings.mode === 'DAILY') { const d = dailyList(); return d[(lv - 1) % d.length]; }
-  if (settings.mode === 'VS' || settings.mode === 'PARTY') return 'PLANE';
+  if (settings.mode === 'VS' || settings.mode === 'PARTY') return CONFIG.TOUR[(lv - 1) % CONFIG.TOUR.length];   // ラウンドごとに立体へ
   if (settings.mode !== 'TOUR' && settings.mode !== 'ZEN') return settings.mode;   // ZEN はTOURと同じ順
   return CONFIG.TOUR[(lv - 1) % CONFIG.TOUR.length];
 }
@@ -2056,10 +2058,11 @@ function updateCamera(dt) {
   if (!surf.is3D) return;
   // 線を引いている間は少し引いて、まわりを見やすく(READY中は速めに寄ってワープ感)
   // X(held.slow)を押している間は大きく引いて全体を見渡す
-  const wantD = (state === 'play' || state === 'ready') && held.slow ? 5.3 : state === 'play' && player.drawing ? 3.95
+  const focusDrawing = isParty() ? (rivals.find(q => q.human === 1) || {}).drawing : player.drawing;
+  const wantD = (state === 'play' || state === 'ready') && held.slow ? 5.3 : state === 'play' && focusDrawing ? 3.95
               : state === 'clear' ? 4.7 : 3.4;   // クリア中は引いて陣地全体を見せる
   cam.D += (wantD - cam.D) * (1 - Math.exp(-dt * (state === 'ready' ? 3.5 : 2.5)));
-  if (state === 'play' || state === 'ready') camFollow(player.c, dt);
+  if (state === 'play' || state === 'ready') camFollow(camFocusCell(), dt);
   else if (state !== 'pause') camRotate([0.25, 1, 0], dt * 0.35); // タイトル等ではゆっくり回る
 }
 
@@ -2255,7 +2258,7 @@ function earthGrid() {
   EARTH_RLE.replace(/([a-p])(\d+)/g, (m, k, n) => { earthMap.fill(k.charCodeAt(0) - 97, i, i + (+n)); i += +n; return ''; });
   return earthMap;
 }
-function earthMode() { return !!surf && surf.key === 'SPHERE'; }
+function earthMode() { return !!surf && surf.key === 'SPHERE' && !hasRivals(); }   // 対戦モードはチームの色で塗る
 // ゲームの向き → 地球の向き。HOME の中心が日本(北緯36度・東経138度)に来るように回す
 function setupEarth() {
   const P = surf.pos;
@@ -2603,6 +2606,7 @@ function initLevel(lv) {
   player.acc = 0; player.drawing = false; player.usedFast = false; player.invuln = 0; player.pts = []; player.overT = 0;
   player.fx = null; syncPos(player);
   if (isParty()) player.invuln = Infinity;          // PARTY では通常の自機はお休み
+  if (isParty() && surf.is3D && rivals.length) { const fc = camFocusCell(); camSnap([surf.dir[fc * 3], surf.dir[fc * 3 + 1], surf.dir[fc * 3 + 2]]); }
   trail = []; trailStart = -1;
   fuseReset();
   if (surf.is3D) {
@@ -2616,6 +2620,11 @@ function initLevel(lv) {
   qixes = [];
   const nq = lv >= CONFIG.TWO_QIX_FROM && !hasRivals() ? 2 : 1;
   for (let k = 0; k < nq; k++) qixes.push(makeQix(k, nq, spd));
+  if (surf.is3D && hasRivals()) {                     // 立体の対戦: 基地を作ってから空き地を数え直す
+    setupRivals3D(lv);
+    initOpen = 0; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) initOpen++;
+    if (isParty()) { player.invuln = Infinity; const fc = camFocusCell(); camSnap([surf.dir[fc * 3], surf.dir[fc * 3 + 1], surf.dir[fc * 3 + 2]]); }
+  }
 
   sparxes = [];
   const ns = bonus || isZen() ? 0 : Math.min(4, surf.def.sparxStart + ((lv - 1) >> 1));   // BONUS AREA は SPARX なし
@@ -2785,6 +2794,7 @@ function inputVec() {
 }
 // マスが変わっていたら、位置をそのマスの中心に合わせる(マス単位で動かされたとき用)
 function syncPos(a) {
+  if (surf.is3D) return;                             // 立体はマスごと(連続した位置は使わない)
   const x = a.c % GW, y = (a.c / GW) | 0;
   if (a.fx == null || Math.floor(a.fx) !== x || Math.floor(a.fy) !== y) { a.fx = x + 0.5; a.fy = y + 0.5; }
 }
@@ -2833,7 +2843,7 @@ function freeMove(a, v, dist, stepFn, stop) {
 function freeMovePlayer(dt) {
   if (player.overT > 0) {
     player.overT -= dt;
-    if (!player.drawing) overPaint(player.fx, player.fy, 1, 0);
+    if (!player.drawing) overPaintAt(player, 1, 0);
     if (player.overT <= 0 && !player.drawing && !isBoundary(player.c)) { snapPlayerToBoundary(); player.fx = null; }
   }
   const v = inputVec();
@@ -3076,7 +3086,7 @@ function closeTrail() {
   redrawField();
   snapPlayerToBoundary();
 
-  if (percent() >= target()) { if (isVS()) vsEnd(); else if (isParty()) partyEnd(); else startClear(false); }
+  if (percent() >= matchTarget()) { if (isVS()) vsEnd(); else if (isParty()) partyEnd(); else startClear(false); }
 }
 
 /* ---------------- SEEKER(追跡者) ---------------- */
@@ -4202,6 +4212,202 @@ function updateQixes(dt) {
   }
 }
 
+/* ---------------- 立体の対戦 ----------------
+   立体ではファイターもマスごとに動く(自機の立体の動きと同じ)。
+   スタート地点: 自機の HOME をチーム0(赤)の基地にし、ほかのチームの基地を「いちばん遠いところ」に作る(公平に)。
+   CPU は、まっすぐ入って曲がって戻る道(マスの列)を作って進む。人間は画面上の向きに一番近い隣のマスへ */
+let rtOwn = new Uint8Array(0);                      // RTRAIL のマスがだれの線か(ファイター番号+1)
+function cellSize3() {
+  if (surf._cs) return surf._cs;
+  const P = surf.pos; let sum = 0, n = 0;
+  for (let c = 0; c < surf.N; c += 37) { const b = surf.nb[c * 4]; if (b >= 0) { sum += Math.hypot(P[c * 3] - P[b * 3], P[c * 3 + 1] - P[b * 3 + 1], P[c * 3 + 2] - P[b * 3 + 2]); n++; } }
+  return (surf._cs = n ? sum / n : 1);
+}
+function cellDist(a, b) { const P = surf.pos; return Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]) / cellSize3(); }
+// 複数のマスからの歩数(4近傍)
+function bfsDist(srcs) {
+  const d = new Int32Array(surf.N).fill(1e9), q = [];
+  for (const c of srcs) { d[c] = 0; q.push(c); }
+  for (let h = 0; h < q.length; h++) { const c = q[h]; for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && d[n] > d[c] + 1) { d[n] = d[c] + 1; q.push(n); } } }
+  return d;
+}
+// 立体の基地: チーム0 = いまの HOME(なければ作る)、ほかは一番遠いところに作る。各チームの線の上のスタート地点を返す
+function carveBases3D(teams, perTeam) {
+  const home = [];
+  for (let c = 0; c < surf.N; c++) if (grid[c] === WALL && colA[c] === HOME_COL) home.push(c);
+  const qc = qixes.length ? [surf.qixCell(qixes[0])] : [];
+  const R = Math.max(3, Math.round((surf.def.home || 4) * 1.3));
+  const centres = [];
+  if (home.length) {                                 // HOME のまん中 = HOME の外からいちばん遠い HOME のマス
+    const out = []; for (let c = 0; c < surf.N; c++) if (!(grid[c] === WALL && colA[c] === HOME_COL)) out.push(c);
+    const d = bfsDist(out); let best = home[0]; for (const c of home) if (d[c] > d[best]) best = c;
+    centres.push(best);
+  }
+  while (centres.length < teams) {
+    const d = bfsDist(centres.concat(qc).length ? centres.concat(qc) : [0]);
+    let best = -1; for (let c = 0; c < surf.N; c++) if (grid[c] === OPEN && (best < 0 || d[c] > d[best])) best = c;
+    centres.push(best);
+  }
+  const starts = [];
+  centres.forEach((c0, t) => {
+    let blob;
+    if (t === 0 && home.length) {                    // HOME: 中と、まわりの線(ふち)
+      const set = new Set(home);
+      for (const c of home) for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && grid[n] === WALL) set.add(n); }
+      blob = [...set];
+    } else {
+      const d = bfsDist([c0]); blob = [];
+      for (let c = 0; c < surf.N; c++) if (d[c] <= R) { grid[c] = WALL; blob.push(c); }
+    }
+    for (const c of blob) { colA[c] = isBoundary(c) ? 0 : teamNo(t); mixA[c] = 0; }   // ふちは線、中はチームの色
+    // スタート地点: 基地のふちの線から、なるべく離れたマスを perTeam 個
+    const edge = blob.filter(c => isBoundary(c)), pick = [];
+    if (edge.length) pick.push(edge[0]);
+    while (pick.length < perTeam && edge.length) {
+      let best = edge[0], bd = -1;
+      for (const c of edge) { const dd = Math.min(...pick.map(p2 => cellDist(c, p2))); if (dd > bd) { bd = dd; best = c; } }
+      pick.push(best);
+    }
+    starts.push(pick);
+  });
+  return starts;
+}
+// 画面上の向き v に一番近い隣のマス(近い順に並べて返す)
+function neighborsToward(c, v) {
+  const p0 = surf.screenOf(c), out = [];
+  for (let k = 0; k < 4; k++) {
+    const n = surf.nb[c * 4 + k];
+    if (n < 0) continue;
+    const p = surf.screenOf(n), dx = p.x - p0.x, dy = p.y - p0.y, l = Math.hypot(dx, dy) || 1;
+    out.push({ n, d: (dx * v[0] + dy * v[1]) / l });
+  }
+  return out.sort((a, b) => b.d - a.d).filter(o => o.d > 0.3).map(o => o.n);
+}
+function straightNext(c, prev) { const k = nbIndex(c, prev); return k < 0 ? -1 : surf.nb[c * 4 + ((k + 2) & 3)]; }
+function turnNext(c, prev, side) { const k = nbIndex(c, prev); return k < 0 ? -1 : surf.nb[c * 4 + ((k + 2 + side + 4) & 3)]; }
+// 空き地を通って a から条件に合うマスまでの道(マスの列)。limit 歩まで
+function bfsPath(a, pass, goal, limit) {
+  const prev = new Int32Array(surf.N).fill(-1), dist = new Int32Array(surf.N), q = [a];
+  prev[a] = a;
+  for (let h = 0; h < q.length; h++) {
+    const c = q[h];
+    if (c !== a && goal(c)) { const path = []; for (let x = c; x !== a; x = prev[x]) path.push(x); return path.reverse(); }
+    if (dist[c] >= limit) continue;
+    for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && prev[n] < 0 && (pass(n) || goal(n))) { prev[n] = c; dist[n] = dist[c] + 1; q.push(n); } }
+  }
+  return [];
+}
+function qixNear3(c, r) { const q = qixes[0]; return q ? cellDist(c, surf.qixCell(q)) < r : false; }
+function planRival3D(r) {
+  const sk = rivalSkill();
+  if (r.overT > 0) {                                 // 上塗り中: 陣地の上を通って、近くの相手の陣地へ
+    r.plan = bfsPath(r.c, n => grid[n] === WALL && !baseA[n], n => grid[n] === WALL && !baseA[n] && ownA[n] >= 1 && ownerTeam(ownA[n]) !== r.team, 30);
+    if (r.plan.length) { r.mode = 'over'; return; }
+  }
+  if (!isBoundary(r.c)) snapActor(r);
+  // 相手の描きかけの線が近ければ、切りにいく
+  if (Math.random() < 0.25 + sk * 0.5) {
+    const enemy = n => (grid[n] === TRAIL && player.drawing && !isParty()) || (grid[n] === RTRAIL && rivals[rtOwn[n] - 1] && rivals[rtOwn[n] - 1].team !== r.team);
+    const path = bfsPath(r.c, n => grid[n] === OPEN, enemy, 10 + Math.round(sk * 14));
+    if (path.length) { r.plan = path; r.mode = 'attack'; r.fast = true; return; }
+  }
+  // 陣地を取りにいく: 空き地へまっすぐ入り、曲がって進む(帰り道は描いている途中で探す)
+  const opens = [0, 1, 2, 3].map(k => surf.nb[r.c * 4 + k]).filter(n => n >= 0 && grid[n] === OPEN);
+  let best = null, bs = 0;
+  for (let tr = 0; tr < 6 && opens.length; tr++) {
+    const D = 3 + ((Math.random() * (5 + sk * 7)) | 0), L = 4 + ((Math.random() * (6 + sk * 10)) | 0), side = Math.random() < 0.5 ? 1 : -1;
+    const path = [pick(opens)];
+    let prev = r.c, cur = path[0], ok = true;
+    for (let i = 1; i < D + L && ok; i++) {
+      const nx = i === D ? turnNext(cur, prev, side) : straightNext(cur, prev);
+      if (nx < 0 || grid[nx] !== OPEN) break;
+      if (qixNear3(nx, surf.def.arm + 4)) { ok = false; break; }
+      path.push(nx); prev = cur; cur = nx;
+    }
+    if (!ok || path.length < 3) continue;
+    if (path.length > bs) { bs = path.length; best = path; }
+  }
+  if (best) { r.plan = best; r.mode = 'raid'; r.fast = Math.random() < sk * 0.4; return; }
+  // よい場所がない: 線の上を歩いて、ヌメリンから離れた空き地の前へ
+  r.plan = bfsPath(r.c, n => grid[n] === WALL && isBoundary(n), n => grid[n] === WALL && isBoundary(n) && !qixNear3(n, surf.def.arm + 8)
+    && [0, 1, 2, 3].some(k => { const m = surf.nb[n * 4 + k]; return m >= 0 && grid[m] === OPEN; }) && Math.random() < 0.15, 60);
+  r.mode = 'walk';
+  if (!r.plan.length) r.think = 0.3;
+}
+function rivalGoHome3D(r) { r.plan = bfsPath(r.c, n => grid[n] === OPEN, n => grid[n] === WALL, 80); r.fast = true; r.mode = 'flee'; }
+// 立体のファイター1人ぶんの更新(人間・CPU)
+function updateRival3D(r, dt) {
+  const spdOf = fast => (r.drawing ? (fast ? CONFIG.DRAW_FAST : CONFIG.DRAW_SLOW) : CONFIG.PLAYER_SPEED) * surf.def.speed;
+  if (r.human) {
+    const inp = humanInput(r.human);
+    if (!inp.v) { r.acc = 0; return; }
+    r.acc = (r.acc || 0) + dt * spdOf(inp.fast);
+    while (r.acc >= 1) {
+      r.acc -= 1;
+      let ok = false;
+      // 同じ向きなら、継ぎ目でもまっすぐ進み続ける
+      const cand = neighborsToward(r.c, inp.v);
+      if (r.prev3 >= 0 && r.lastV && r.lastV[0] * inp.v[0] + r.lastV[1] * inp.v[1] > 0.9) { const st = straightNext(r.c, r.prev3); if (st >= 0 && cand.includes(st)) cand.unshift(st); }
+      for (const n of cand) { const c0 = r.c; if (rivalStep(r, n)) { r.prev3 = c0; ok = true; break; } }
+      r.lastV = inp.v;
+      if (!ok) { r.acc = 0; break; }
+      if (state !== 'play' || r.dead > 0) break;
+    }
+    return;
+  }
+  const q = qixes[0];
+  if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
+  if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14)) rivalGoHome3D(r);
+  if (!r.plan.length) {
+    if (r.drawing) { rivalGoHome3D(r); if (!r.plan.length) { rivalFail(r, 'stuck'); return; } }
+    else { r.think -= dt; if (r.think > 0) return; r.think = rand(0.1, 0.4) * (1.3 - rivalSkill()); planRival3D(r); if (!r.plan.length) return; }
+  }
+  r.acc = (r.acc || 0) + dt * spdOf(r.fast) * (0.8 + rivalSkill() * 0.25);
+  while (r.acc >= 1 && r.plan.length) {
+    r.acc -= 1;
+    const tg = r.plan[0];
+    if (tg === r.c) { r.plan.shift(); continue; }
+    if (nbIndex(r.c, tg) < 0) { r.plan = []; break; }
+    const was = r.drawing;
+    if (rivalStep(r, tg)) { if (r.c === tg) r.plan.shift(); else r.plan = []; if (was && !r.drawing) r.plan = []; }
+    else { r.plan = []; if (r.drawing) rivalGoHome3D(r); break; }
+    if (state !== 'play' || r.dead > 0) break;
+  }
+  if (r.drawing && !r.plan.length) rivalGoHome3D(r);
+}
+function fighterScreen(r) { return surf.is3D ? surf.screenOf(r.c) : { x: r.fx * CS, y: FIELD_Y + r.fy * CS }; }
+// 立体のファイターの描画: 線(見えているところ)と Clawd
+function drawRivals3D(t) {
+  for (const r of rivals) {
+    if (r.drawing && r.trail.length) {
+      const path = new Path2D(); let pen = false, prev = null;
+      for (const c of r.trail) {
+        if (!visA[c]) { pen = false; continue; }
+        const p = surf.screenOf(c);
+        if (pen && Math.hypot(p.x - prev.x, p.y - prev.y) > 60) pen = false;
+        if (pen) path.lineTo(p.x, p.y); else { path.moveTo(p.x, p.y); pen = true; }
+        prev = p;
+      }
+      inkBand(path, INK_COLORS[r.col], 5.5);
+    }
+    if (r.dead > 0) continue;
+    const p = surf.screenOf(r.c);
+    if (!visA[r.c]) { drawOffMarker(p, INK_COLORS[r.col], 5); continue; }
+    if (r.inv > 0) { const k = 1 - r.inv / 1.5; ctx.globalAlpha = 1 - k; ctx.strokeStyle = INK_COLORS[r.col]; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y - 4, 10 + k * 22, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+    if (r.overT > 0) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(p.x, p.y - 4, 14, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    drawClawd(p.x, p.y - 3, 1.6, { col: INK_COLORS[r.col], moving: true, walkF: Math.floor(blinkT * 8) & 1, drawing: r.drawing });
+    ctx.fillStyle = INK_COLORS[r.col]; ctx.font = "bold 10px 'Courier New', monospace"; ctx.textAlign = 'center';
+    ctx.fillText(r.name || 'CPU', p.x, p.y + 13);
+    if (r.human) { ctx.beginPath(); ctx.moveTo(p.x - 5, p.y - 20); ctx.lineTo(p.x + 5, p.y - 20); ctx.lineTo(p.x, p.y - 14); ctx.closePath(); ctx.fill(); }
+    if (r.sayT > 0) drawBubble(p.x, p.y - 12, r.sayTxt, Math.min(1, r.sayT * 3), INK_COLORS[r.col]);
+  }
+}
+// カメラが追いかけるマス: PARTY は P1(いなければ最初のファイター)、それ以外は自機
+function camFocusCell() {
+  if (isParty() && rivals.length) { const r = rivals.find(q => q.human === 1) || rivals[0]; return r.dead > 0 ? r.home : r.c; }
+  return player.c;
+}
+
 /* ---------------- 魂(やられた / 復活の演出) ----------------
    やられると、チームの色の魂がゆらゆら昇って画面の外へ。復活の前には画面の上から魂が飛んできて、
    戻る場所にぴったり着いたところで復活する。自機がやられたときも昇る魂を出す */
@@ -4259,14 +4465,30 @@ function fighterOver(r, it) {
   floats.push({ x: p.x, y: p.y - 14, txt: r.name + ' 上塗り!', t: 1.6, col: INK_COLORS[r.col], big: true });
   Snd.item('over');
 }
+function overPaintAt(a, own, team) {
+  if (!surf.is3D) return overPaint(a.fx, a.fy, own, team);
+  const d = bfsNear(a.c, 2);
+  return overPaintCells(d, own, team);
+}
+function bfsNear(c0, rad) {
+  const out = [c0], seen = new Set(out);
+  for (let h = 0, lv = 0; lv < rad; lv++) { const end = out.length; for (; h < end; h++) for (let k = 0; k < 4; k++) { const n = surf.nb[out[h] * 4 + k]; if (n >= 0 && !seen.has(n)) { seen.add(n); out.push(n); } } }
+  return out;
+}
 function overPaint(fx, fy, own, team) {
-  let n = 0;
+  const cells = [];
   const x0 = Math.floor(fx), y0 = Math.floor(fy);
   for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
     if (dx * dx + dy * dy > 4.5) continue;
     const x = x0 + dx, y = y0 + dy;
     if (x < 0 || y < 0 || x >= GW || y >= GH) continue;
-    const c = idx(x, y);
+    cells.push(idx(x, y));
+  }
+  return overPaintCells(cells, own, team);
+}
+function overPaintCells(cells, own, team) {
+  let n = 0;
+  for (const c of cells) {
     if (grid[c] !== WALL || baseA[c] || colA[c] === 0 || colA[c] === HOME_COL) continue;
     const o = ownA[c];
     if (o === own) continue;
@@ -4434,9 +4656,10 @@ function drawPartyRes(t) {
   partyRank.forEach((r, i) => {
     const y = 358 + i * 52, pct = (r.area / initOpen * 100).toFixed(1);
     ctx.fillStyle = INK_COLORS[TEAM_COLS[r.team]]; ctx.fillRect(140, y - 26, (W - 280) * r.area / Math.max(1, partyRank[0].area), 34);
-    ctx.fillStyle = '#10121e'; ctx.font = "bold 18px 'Courier New', monospace"; ctx.textAlign = 'left';
+    ctx.font = "bold 18px 'Courier New', monospace"; ctx.textAlign = 'left';
     const who = r.members.filter(q => q.human).map(q => q.name).join('・') || 'CPU';
-    ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.team] + ' ' + who, 150, y - 2);
+    ctx.fillStyle = '#000000'; ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.team] + ' ' + who, 151, y - 1);   // 影
+    ctx.fillStyle = '#ffffff'; ctx.fillText((i === 0 ? '👑 ' : (i + 1) + '位 ') + TEAM_NAMES[r.team] + ' ' + who, 150, y - 2);
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff';
     ctx.fillText(pct + '%', W - 150, y - 2);
     ctx.textAlign = 'center';
@@ -4495,10 +4718,37 @@ function perimeterSplit(n) {
   return Array.from({ length: n }, (_, k) => ring[Math.round(k * L / n) % L]);
 }
 function setupRivals(lv) {
-  ownA = new Uint8Array(surf.N); neutralAt = new Float32Array(surf.N).fill(-99);
+  ownA = new Uint8Array(surf.N); neutralAt = new Float32Array(surf.N).fill(-99); rtOwn = new Uint8Array(surf.N);
   Snd.voiceStopAll();
   rivals = [];
-  if (isParty() && !surf.is3D) {
+  if (surf.is3D) return;                             // 立体はヌメリンが出たあとで setupRivals3D
+  setupRivalsPlane(lv);
+}
+// 立体: 基地を作って、そのふちから出発(ヌメリンから遠いところに基地を作るので、ヌメリンを出したあとに呼ぶ)
+function setupRivals3D(lv) {
+  if (!hasRivals()) return;
+  {
+    const vs = isVS(), n = vs ? (lv >= 4 ? 2 : 1) : 3 * party.size;
+    const teams = vs ? 1 + n : 3, per = vs ? 1 : party.size;
+    const starts = carveBases3D(teams, per);
+    for (let k = 0; k < n; k++) {
+      const r = makeRival(k);
+      if (vs) { r.team = k === 0 ? 2 : 1; const st = starts[k + 1]; r.home = r.c = st[0]; r.col = RIVAL_COLS[k % RIVAL_COLS.length]; }
+      else {
+        const t = k % 3, m = (k / 3) | 0, st = starts[t];
+        r.team = t; r.member = m; r.col = TEAM_COLS[t]; r.home = r.c = st[m % st.length];
+        r.human = m === 0 && party.slots[t] ? lobbyPNo(t) : 0;
+        r.name = r.human ? 'P' + r.human : 'CPU';
+      }
+      r.prev3 = -1; r.acc = 0; rivals.push(r);
+    }
+    vsT = CONFIG.VS_TIME; vsWin = false;
+    if (isParty()) player.invuln = Infinity;
+    else if (rivals[0] && state !== 'title') rivalSay(rivals[0], 'start');
+  }
+}
+function setupRivalsPlane(lv) {
+  if (isParty()) {
     const n = 3 * party.size, homes = perimeterSplit(n);
     for (let k = 0; k < n; k++) {
       const t = k % 3, m = (k / 3) | 0, r = makeRival(k);
@@ -4559,7 +4809,7 @@ function rivalStep(r, n) {
   if (v === WALL) { r.c = n; rivalClose(r); return true; }
   return false;                                      // 自分の線・もう一人のCPUの線には入らない
 }
-function enterRival(r, n) { grid[n] = RTRAIL; r.trail.push(n); r.c = n; }
+function enterRival(r, n) { grid[n] = RTRAIL; rtOwn[n] = r.id + 1; r.trail.push(n); r.c = n; }
 function cutPlayer(r) {
   if (player.invuln > 0 || deathTimer > 0) return;
   rivalSay(r, 'cut');
@@ -4592,7 +4842,7 @@ function rivalClose(r) {
     Snd.splat(0.08);
     if (Math.random() < 0.4) rivalSay(r, 'claim');
   }
-  if (percent() >= target() && state === 'play') { if (isParty()) partyEnd(); else vsEnd(); }
+  if (percent() >= matchTarget() && state === 'play') { if (isParty()) partyEnd(); else vsEnd(); }
 }
 // 自機が陣地を取ったとき、囲まれた CPU の線はやられる
 function trapRivals() {
@@ -4631,7 +4881,7 @@ function rivalFail(r, why, by) {
   } else floats.push({ x: p.x, y: p.y - 16, txt: r.name + ' ダウン!', t: 1.4, col: INK_COLORS[r.col] });
 }
 function respawnRival(r) {
-  const hx = ((r.home % GW) + 0.5) * CS, hy = FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS;
+  const hp = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS }, hx = hp.x, hy = hp.y;
   spawnParticles(hx, hy, 18, INK_COLORS[r.col]);
   floats.push({ x: hx, y: hy - 30, txt: r.name + ' 復活!', t: 1.2, col: INK_COLORS[r.col] });
   r.c = r.home;                                      // スタート地点(埋もれていたら、そこから一番近い線)
@@ -4761,8 +5011,14 @@ function updateRivals(dt) {
     if (r.sayT > 0) r.sayT -= dt;
     if (r.dead > 0) { r.dead -= dt; if (r.dead <= 0) { r.dead = 0; respawnRival(r); } continue; }
     if (r.inv > 0) r.inv -= dt;
-    if (r.overT > 0) { r.overT -= dt; if (!r.drawing) overPaint(r.fx, r.fy, 2 + r.id, r.team); if (r.overT <= 0) r.plan = []; }
+    if (r.overT > 0) { r.overT -= dt; if (!r.drawing) overPaintAt(r, 2 + r.id, r.team); if (r.overT <= 0) r.plan = []; }
     if (!r.drawing && !(r.overT > 0) && !isBoundary(r.c)) snapActor(r);   // ほかの誰かの陣地に埋もれたら、近くの線の上へ
+    if (surf.is3D) {
+      updateRival3D(r, dt);
+      if (state !== 'play' || deathTimer > 0) return;
+      if (r.inv <= 0 && r.dead <= 0 && sparxes.some(sp => sp.c === r.c)) rivalFail(r, 'sparx');
+      continue;
+    }
     syncPos(r);
     if (r.human) {                                   // 人間: 入力の向きにそのまま進む
       const inp = humanInput(r.human);
@@ -4815,7 +5071,8 @@ function updateRivals(dt) {
 function updateVoices() {
   for (const r of rivals) {
     const on = r.drawing && r.dead <= 0 && state === 'play';
-    if (on) { if (!r.voice) { Snd.voiceStart(r.id, r.team, (r.fx / GW) * 1.4 - 0.7); r.voice = true; } Snd.voiceUpdate(r.id, r.trail.length, (r.fx / GW) * 1.4 - 0.7); }
+    const pan = fighterScreen(r).x / W * 1.4 - 0.7;
+    if (on) { if (!r.voice) { Snd.voiceStart(r.id, r.team, pan); r.voice = true; } Snd.voiceUpdate(r.id, r.trail.length, pan); }
     else if (r.voice) { Snd.voiceStop(r.id); r.voice = false; }
   }
 }
@@ -5459,6 +5716,7 @@ function update(dt) {
     return updateWorld(dt, mv || !!inputVec());
   }
   // 立体: マスごとに上下左右
+  if (player.overT > 0) { player.overT -= dt; if (!player.drawing) overPaintAt(player, 1, 0); if (player.overT <= 0 && !player.drawing && !isBoundary(player.c)) snapPlayerToBoundary(); }
   const d = currentDir();
   const spd = (player.drawing
     ? (held.fast ? CONFIG.DRAW_FAST : CONFIG.DRAW_SLOW)
@@ -5874,6 +6132,7 @@ function drawBackView(t) {
   for (const sp of sparxes) dot(cw(sp.c), '#ff5a28', 3);
   for (const k of seekers) dot(cw(k.c), '#ff5cf0', 3.5);
   for (const b of buddies) dot(cw(b.c), BUDDIES[b.k].role === 'ally' ? '#9dffea' : '#ffd76b', 3);
+  for (const r of rivals) if (r.dead <= 0) dot(cw(r.c), INK_COLORS[r.col], 3);
   for (const q of qixes) dot(S.world(q.p || [q.x, q.y]), qixStroke(q.hue, 60, 1), 4.5);
   ctx.fillStyle = '#8fa3d9';
   ctx.font = "bold 10px 'Courier New', monospace";
@@ -5897,6 +6156,7 @@ function render() {
   drawSeekers();
   drawBuddies();
   if (rivals.length && !surf.is3D) drawRivals(t);
+  if (rivals.length && surf.is3D) drawRivals3D(t);
   if (rivals.length || souls.length) drawSouls();
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
   if (isParty() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause' || state === 'partyres')) drawPartyHud();
@@ -6236,6 +6496,7 @@ function render3D(t) {
     let ci;
     if (g === OPEN) ci = sealed ? 2 : par[c];
     else if (g === TRAIL) ci = trailCi;
+    else if (g === RTRAIL) { const o = rivals[rtOwn[c] - 1]; ci = o ? TEAMC_CI0 + o.team * 4 : 3; }
     else {
       const ca = claimAt[c];
       if (ca > now) ci = par[c];                    // 塗りの波がまだ届いていない
